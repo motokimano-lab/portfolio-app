@@ -2,7 +2,10 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 import plotly.express as px
-from datetime import datetime # ← これを追記
+from datetime import datetime
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
 
 # ========= 1. データ読み込み =========
 url = "https://docs.google.com/spreadsheets/d/18PLN9uJHxVZCAvAw92piWCniLlQ2i8Z6dT8ok_jycBI/export?format=csv&gid=0"
@@ -529,6 +532,83 @@ if not df_div_share.empty:
 else:
     st.info("配当データ（税引後）がありません。")
 
+
+# ========= 資産推移（積み上げ面グラフ） =========
+
+st.markdown("---")
+st.header("📈 資産推移（構成比）")
+
+def load_daily_log():
+    scope = ["https://spreadsheets.google.com/feeds",
+             "https://www.googleapis.com/auth/drive"]
+
+    creds = ServiceAccountCredentials.from_json_keyfile_name(
+        "credentials.json", scope
+    )
+    client = gspread.authorize(creds)
+
+    spreadsheet = client.open("portfolio_data")
+    worksheet = spreadsheet.worksheet("Daily_Log")
+
+    data = worksheet.get_all_records()
+    df_log = pd.DataFrame(data)
+
+    return df_log
+
+
+df_log = load_daily_log()
+
+if not df_log.empty:
+
+    # 日付変換
+    df_log["date"] = pd.to_datetime(df_log["date"])
+
+    # 並び替え
+    df_log = df_log.sort_values("date")
+
+    # ワイド → ロング変換
+    df_melt = df_log.melt(
+        id_vars="date",
+        value_vars=["日本株", "米国株", "欧・新興国株", "暗号資産", "現金・債券"],
+        var_name="asset_class",
+        value_name="value"
+    )
+
+    # グラフ作成
+    fig = px.area(
+        df_melt,
+        x="date",
+        y="value",
+        color="asset_class",
+        title="資産構成の推移",
+        color_discrete_map={
+            "日本株": "#1f77b4",
+            "米国株": "#ff7f0e",
+            "欧・新興国株": "#2ca02c",
+            "現金・債券": "#d62728",
+            "暗号資産": "#e377c2"
+        },
+        category_orders={
+            "asset_class": ["日本株", "米国株", "欧・新興国株", "暗号資産", "現金・債券"]
+        }
+    )
+
+    # ここも中に入れる
+    fig.update_traces(opacity=0.9)
+
+    fig.add_scatter(
+        x=df_log["date"],
+        y=df_log["合計"],
+        mode="lines",
+        name="合計",
+        line=dict(width=3, color="black")
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+else:
+    st.info("まだログがありません")
+
 # --- (3) 資産額の表 ---
 st.subheader("📝 保有資産一覧")
 st.dataframe(df_filtered[["ticker", "display_name", "quantity", "price", "value_jpy", "profit_pct"]].style.format({"profit_pct": "{:.2f}%", "value_jpy": "{:,.0f}"}))
@@ -538,3 +618,51 @@ st.markdown("---")
 # --- (6) 配当金の表 ---
 st.subheader("📈 銘柄別配当データ")
 st.dataframe(df_filtered[["ticker", "display_name", "div_yield", "annual_div_jpy", "after_tax_div_jpy"]].style.format({"div_yield": "{:.2%}", "annual_div_jpy": "{:,.0f}", "after_tax_div_jpy": "{:,.0f}"}))
+
+
+
+#資産記録
+def save_daily_log(df):
+
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+
+    creds = ServiceAccountCredentials.from_json_keyfile_name(
+        "credentials.json", scope
+    )
+
+    client = gspread.authorize(creds)
+
+    spreadsheet = client.open("portfolio_data")
+    sheet = spreadsheet.worksheet("Daily_Log")
+
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # ✅ 重複チェック追加
+    existing_dates = sheet.col_values(1)
+
+    if today in existing_dates:
+        return "⚠️ 今日のデータはすでに記録済みです"
+
+    grouped = df.groupby("asset_class")["value_jpy"].sum()
+    total = df["value_jpy"].sum()
+
+    row = [
+        today,
+        grouped.get("日本株", 0),
+        grouped.get("米国株", 0),
+        grouped.get("欧・新興国株", 0),
+        grouped.get("暗号資産", 0),
+        grouped.get("現金・債券", 0),
+        total
+    ]
+
+    sheet.append_row(row)
+
+    return "✅ 保存完了！"
+
+if st.button("📅 今日の資産を記録"):
+    result = save_daily_log(df_filtered)
+    st.success(result)
