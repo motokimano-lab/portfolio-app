@@ -545,7 +545,8 @@ def load_daily_log():
     df_log = pd.read_csv(url)
 
     return df_log
-
+    
+df_log = load_daily_log()
 if not df_log.empty:
 
     # 日付変換
