@@ -539,24 +539,12 @@ st.markdown("---")
 st.header("📈 資産推移（構成比）")
 
 def load_daily_log():
-    scope = ["https://spreadsheets.google.com/feeds",
-             "https://www.googleapis.com/auth/drive"]
 
-    creds = ServiceAccountCredentials.from_json_keyfile_name(
-        "credentials.json", scope
-    )
-    client = gspread.authorize(creds)
+    url = "https://docs.google.com/spreadsheets/d/18PLN9uJHxVZCAvAw92piWCniLlQ2i8Z6dT8ok_jycBI/export?format=csv&gid=1317755397"
 
-    spreadsheet = client.open("portfolio_data")
-    worksheet = spreadsheet.worksheet("Daily_Log")
-
-    data = worksheet.get_all_records()
-    df_log = pd.DataFrame(data)
+    df_log = pd.read_csv(url)
 
     return df_log
-
-
-df_log = load_daily_log()
 
 if not df_log.empty:
 
