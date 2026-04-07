@@ -536,7 +536,6 @@ else:
 # ========= 資産推移（積み上げ面グラフ） =========
 
 st.markdown("---")
-st.header("📈 資産推移（構成比）")
 
 def load_daily_log():
 
@@ -569,7 +568,7 @@ if not df_log.empty:
         x="date",
         y="value",
         color="asset_class",
-        title="資産構成の推移",
+        title="📈 資産額の推移",
         color_discrete_map={
             "日本株": "#1f77b4",
             "米国株": "#ff7f0e",
