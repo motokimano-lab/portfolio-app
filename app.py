@@ -662,8 +662,31 @@ def load_daily_log_detail():
         "https://www.googleapis.com/auth/drive"
     ]
 
-    creds = ServiceAccountCredentials.from_json_keyfile_name(
-        "credentials.json", scope
+import json
+from oauth2client.service_account import ServiceAccountCredentials
+
+def load_daily_log_detail():
+
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+
+    creds_dict = st.secrets["gcp_service_account"]
+
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(
+        creds_dict, scope
+    )
+
+    client = gspread.authorize(creds)
+
+    spreadsheet = client.open("portfolio_data")
+    worksheet = spreadsheet.worksheet("Daily_Log")
+
+    data = worksheet.get_all_records()
+    df_log = pd.DataFrame(data)
+
+    return df_log
     )
 
     client = gspread.authorize(creds)
@@ -728,3 +751,5 @@ if not df_log.empty:
 
 else:
     st.info("ログデータがありません")
+
+
