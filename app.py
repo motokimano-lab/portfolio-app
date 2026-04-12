@@ -116,7 +116,6 @@ color_map = {"損益率": "profit_pct", "年初来比": "ytd_pct", "前日比": 
 selected_color_col = color_map.get(color_option, "profit_pct")
 
 # ========= 5. 表示セクション =========
-
 # 現在の時刻を取得して、好きな形式の文字列にする
 # 実行した瞬間の「年/月/日 時:分」が作成されます
 current_time = datetime.now().strftime("%Y/%m/%d %H:%M")
@@ -654,3 +653,78 @@ def save_daily_log(df):
 if st.button("📅 今日の資産を記録"):
     result = save_daily_log(df_filtered)
     st.success(result)
+
+st.header("📊 期間比較（成長分析）")
+
+def load_daily_log_detail():
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+
+    creds = ServiceAccountCredentials.from_json_keyfile_name(
+        "credentials.json", scope
+    )
+
+    client = gspread.authorize(creds)
+
+    spreadsheet = client.open("portfolio_data")
+    worksheet = spreadsheet.worksheet("Daily_Log")
+
+    data = worksheet.get_all_records()
+    df_log = pd.DataFrame(data)
+
+    return df_log
+
+df_log = load_daily_log_detail()
+
+if not df_log.empty:
+
+    df_log["date"] = pd.to_datetime(df_log["date"])
+
+    date_list = sorted(df_log["date"].unique())
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        start_date = st.selectbox("開始日", date_list, index=0)
+
+    with col2:
+        end_date = st.selectbox("終了日", date_list, index=len(date_list)-1)
+
+    df_start = df_log[df_log["date"] == start_date]
+    df_end = df_log[df_log["date"] == end_date]
+
+    df_merged = pd.merge(
+        df_start,
+        df_end,
+        on="ticker",
+        how="outer",
+        suffixes=("_start", "_end")
+    ).fillna(0)
+
+    df_merged["diff"] = df_merged["value_jpy_end"] - df_merged["value_jpy_start"]
+
+    df_merged["growth_pct"] = df_merged.apply(
+        lambda r: 0 if r["value_jpy_start"] == 0 else (r["diff"] / r["value_jpy_start"]) * 100,
+        axis=1
+    )
+
+    df_merged["display_name"] = df_merged["display_name_end"]
+    df_merged["asset_class"] = df_merged["asset_class_end"]
+    df_merged["sector"] = df_merged["sector_end"]
+
+    fig = px.treemap(
+        df_merged,
+        path=["asset_class", "sector", "display_name"],
+        values="diff",
+        color="growth_pct",
+        color_continuous_scale=["red", "gray", "green"],
+        color_continuous_midpoint=0,
+        title="資産増減ツリーマップ"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+else:
+    st.info("ログデータがありません")
