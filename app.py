@@ -674,6 +674,10 @@ if st.button("📅 今日の資産を記録"):
     result = save_daily_log_detail(df_filtered)
     st.success(result)
 
+
+st.write(df_log.head())
+st.write(df_log["date"].unique())
+
 st.header("📊 期間比較（成長分析）")
 
 def load_daily_log_detail():
