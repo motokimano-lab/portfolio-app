@@ -674,48 +674,31 @@ if st.button("📅 今日の資産を記録"):
     result = save_daily_log_detail(df_filtered)
     st.success(result)
 
-
-st.write(df_log.head())
-st.write(df_log["date"].unique())
-st.write(df_start.shape)
-st.write(df_end.shape)
-st.write(df_merged.head())
-st.write(df_merged["diff"].describe())
-
-# --- デバッグ用コード（グラフコードの直前に挿入） ---
-st.write(f"開始日のデータ数: {len(df_start)}")
-st.write(f"終了日のデータ数: {len(df_end)}")
-st.write(f"マージ後のデータ数: {len(df_merged)}")
-
-if not df_merged.empty:
-    st.write("マージ後データの先頭5行:")
-    st.dataframe(df_merged[['ticker', 'value_jpy_start', 'value_jpy_end', 'diff']].head())
-# ----------------------------------------------
-
+# --- (7) 期間比較（成長分析） ---
+st.markdown("---")
 st.header("📊 期間比較（成長分析）")
 
-# （中略：load_daily_log_detail関数などはそのまま）
-
-df_log = load_daily_log_detail()
-
+# データ再読み込み（または既存のdf_logを使用）
 if not df_log.empty:
-    # 日付型変換と銘柄名のクレンジング
-    df_log["date"] = pd.to_datetime(df_log["date"]).dt.date
-    df_log["ticker"] = df_log["ticker"].astype(str).str.strip().str.upper()
+    # 1. データのクレンジング
+    df_compare = df_log.copy()
+    df_compare["date"] = pd.to_datetime(df_compare["date"]).dt.date
+    df_compare["ticker"] = df_compare["ticker"].astype(str).str.strip().str.upper()
     
-    date_list = sorted(df_log["date"].unique())
+    date_list = sorted(df_compare["date"].unique())
 
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.selectbox("開始日", date_list, index=0)
-    with col2:
-        end_date = st.selectbox("終了日", date_list, index=len(date_list)-1)
+    # 2. 日付選択
+    col_date1, col_date2 = st.columns(2)
+    with col_date1:
+        start_date = st.selectbox("比較開始日（過去）", date_list, index=0)
+    with col_date2:
+        end_date = st.selectbox("比較終了日（現在）", date_list, index=len(date_list)-1)
 
-    # ✅ 修正1: 選択された日付のデータを抽出する
-    df_start = df_log[df_log["date"] == start_date].copy()
-    df_end = df_log[df_log["date"] == end_date].copy()
+    # 3. 指定日の抽出
+    df_start = df_compare[df_compare["date"] == start_date].copy()
+    df_end = df_compare[df_compare["date"] == end_date].copy()
 
-    # マージ
+    # 4. マージ（銘柄コードで紐付け）
     df_merged = pd.merge(
         df_start,
         df_end,
@@ -724,38 +707,46 @@ if not df_log.empty:
         suffixes=("_start", "_end")
     ).fillna(0)
 
-    # 増減計算
-    df_merged["diff"] = df_merged["value_jpy_end"] - df_merged["value_jpy_start"]
-    
-    # ✅ 修正2: ツリーマップの「面積」用に絶対値を作る
-    # これをしないと、マイナスの銘柄がある時にグラフが消えます
-    df_merged["abs_diff"] = df_merged["diff"].abs()
-
+    # 5. 指標計算
+    # 差分（円）
+    df_merged["diff_val"] = df_merged["value_jpy_end"] - df_merged["value_jpy_start"]
+    # 成長率（%）
     df_merged["growth_pct"] = df_merged.apply(
-        lambda r: 0 if r["value_jpy_start"] == 0 else (r["diff"] / r["value_jpy_start"]) * 100,
+        lambda r: 0 if r["value_jpy_start"] == 0 else (r["diff_val"] / r["value_jpy_start"]) * 100,
         axis=1
     )
-
-    # ✅ 修正3: outer joinで欠損した情報を補完する
-    # (開始日にいなくて終了日にいる銘柄などのため)
+    
+    # ✅ 情報の補完（階層表示に必要）
     for col in ["display_name", "asset_class", "sector"]:
         df_merged[col] = df_merged[f"{col}_end"].where(df_merged[f"{col}_end"] != 0, df_merged[f"{col}_start"])
 
-    # 0以外のデータがある場合のみ描画
-    if df_merged["abs_diff"].sum() > 0:
-        fig = px.treemap(
-            df_merged[df_merged["abs_diff"] > 0], # 差分がある銘柄のみ
+    # 6. ツリーマップ描画
+    if not df_end.empty:
+        fig_growth = px.treemap(
+            df_merged[df_merged["value_jpy_end"] > 0], # 終了日に保有している銘柄
             path=["asset_class", "sector", "display_name"],
-            values="abs_diff",  # ✅ 面積は絶対値を使う
-            color="growth_pct",
+            values="value_jpy_end",  # ✅ サイズは終了日の資産額
+            color="growth_pct",      # ✅ 色は開始日からの増減率
             color_continuous_scale=["red", "lightgray", "green"],
             color_continuous_midpoint=0,
-            title=f"{start_date} vs {end_date} 資産増減（タイルの大きさは変化額の絶対値）",
-            hover_data={"diff": ":,.0f", "growth_pct": ":.2f%"}
+            range_color=[-10, 10],   # 色の振れ幅を±10%に固定（お好みで）
+            title=f"資産状況: {end_date} （色は {start_date} からの増減率）",
+            hover_data={
+                "value_jpy_end": ":,.0f",
+                "diff_val": ":+,.0f",
+                "growth_pct": ":+.2f%"
+            }
         )
-        st.plotly_chart(fig, use_container_width=True)
+        
+        fig_growth.update_layout(height=700, margin=dict(t=40, b=10, l=10, r=10))
+        st.plotly_chart(fig_growth, use_container_width=True, key="growth_tree")
     else:
-        st.info("選択された期間で資産額に変化はありませんでした。")
+        st.info("選択された終了日のデータがありません。")
+
+    # --- デバッグ表示（一番下に配置） ---
+    with st.expander("🛠 デバッグ情報を確認"):
+        st.write(f"開始日データ: {len(df_start)}件 / 終了日データ: {len(df_end)}件")
+        st.dataframe(df_merged[['ticker', 'value_jpy_start', 'value_jpy_end', 'diff_val', 'growth_pct']].head())
 
 else:
-    st.info("ログデータがありません")
+    st.info("比較するためのログデータがスプレッドシートに見当たりません。")
