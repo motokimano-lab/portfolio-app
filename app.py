@@ -684,59 +684,28 @@ st.write(df_merged["diff"].describe())
 
 st.header("📊 期間比較（成長分析）")
 
-def load_daily_log_detail():
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ]
-
-import json
-from oauth2client.service_account import ServiceAccountCredentials
-
-def load_daily_log_detail():
-
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ]
-
-    creds_dict = st.secrets["gcp_service_account"]
-
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(
-        creds_dict, scope
-    )
-
-    client = gspread.authorize(creds)
-
-    spreadsheet = client.open("portfolio_data")
-    worksheet = spreadsheet.worksheet("Daily_Log")
-
-    data = worksheet.get_all_records()
-    df_log = pd.DataFrame(data)
-
-    return df_log
-
+# （中略：load_daily_log_detail関数などはそのまま）
 
 df_log = load_daily_log_detail()
 
 if not df_log.empty:
-
+    # 日付型変換と銘柄名のクレンジング
     df_log["date"] = pd.to_datetime(df_log["date"]).dt.date
+    df_log["ticker"] = df_log["ticker"].astype(str).str.strip().str.upper()
     
     date_list = sorted(df_log["date"].unique())
 
     col1, col2 = st.columns(2)
-
     with col1:
         start_date = st.selectbox("開始日", date_list, index=0)
-
     with col2:
         end_date = st.selectbox("終了日", date_list, index=len(date_list)-1)
 
-    df_start["ticker"] = df_start["ticker"].astype(str).str.strip().str.upper()
-    df_end["ticker"] = df_end["ticker"].astype(str).str.strip().str.upper()
-    df_log["ticker"] = df_log["ticker"].astype(str).str.strip().str.upper()
+    # ✅ 修正1: 選択された日付のデータを抽出する
+    df_start = df_log[df_log["date"] == start_date].copy()
+    df_end = df_log[df_log["date"] == end_date].copy()
 
+    # マージ
     df_merged = pd.merge(
         df_start,
         df_end,
@@ -745,31 +714,38 @@ if not df_log.empty:
         suffixes=("_start", "_end")
     ).fillna(0)
 
+    # 増減計算
     df_merged["diff"] = df_merged["value_jpy_end"] - df_merged["value_jpy_start"]
+    
+    # ✅ 修正2: ツリーマップの「面積」用に絶対値を作る
+    # これをしないと、マイナスの銘柄がある時にグラフが消えます
+    df_merged["abs_diff"] = df_merged["diff"].abs()
 
     df_merged["growth_pct"] = df_merged.apply(
         lambda r: 0 if r["value_jpy_start"] == 0 else (r["diff"] / r["value_jpy_start"]) * 100,
         axis=1
     )
 
-    df_merged["display_name"] = df_merged["display_name_end"]
-    df_merged["asset_class"] = df_merged["asset_class_end"]
-    df_merged["sector"] = df_merged["sector_end"]
+    # ✅ 修正3: outer joinで欠損した情報を補完する
+    # (開始日にいなくて終了日にいる銘柄などのため)
+    for col in ["display_name", "asset_class", "sector"]:
+        df_merged[col] = df_merged[f"{col}_end"].where(df_merged[f"{col}_end"] != 0, df_merged[f"{col}_start"])
 
-    fig = px.treemap(
-        df_merged,
-        path=["asset_class", "sector", "display_name"],
-        values="diff",
-        color="growth_pct",
-        color_continuous_scale=["red", "gray", "green"],
-        color_continuous_midpoint=0,
-        title="資産増減ツリーマップ"
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
+    # 0以外のデータがある場合のみ描画
+    if df_merged["abs_diff"].sum() > 0:
+        fig = px.treemap(
+            df_merged[df_merged["abs_diff"] > 0], # 差分がある銘柄のみ
+            path=["asset_class", "sector", "display_name"],
+            values="abs_diff",  # ✅ 面積は絶対値を使う
+            color="growth_pct",
+            color_continuous_scale=["red", "lightgray", "green"],
+            color_continuous_midpoint=0,
+            title=f"{start_date} vs {end_date} 資産増減（タイルの大きさは変化額の絶対値）",
+            hover_data={"diff": ":,.0f", "growth_pct": ":.2f%"}
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("選択された期間で資産額に変化はありませんでした。")
 
 else:
     st.info("ログデータがありません")
-
-st.write(df_log.head())
-st.write(df_log["date"].unique())
