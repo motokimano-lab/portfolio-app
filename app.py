@@ -548,40 +548,25 @@ else:
 
 # ========= 資産推移（積み上げ面グラフ） =========
 
-st.markdown("---")
+st.header("📈 資産推移（構成比）")
 
-def load_daily_log():
+df_log = load_daily_log_detail()
 
-    url = "https://docs.google.com/spreadsheets/d/18PLN9uJHxVZCAvAw92piWCniLlQ2i8Z6dT8ok_jycBI/export?format=csv&gid=1317755397"
-
-    df_log = pd.read_csv(url)
-
-    return df_log
-    
-df_log = load_daily_log()
 if not df_log.empty:
 
-    # 日付変換
     df_log["date"] = pd.to_datetime(df_log["date"])
-
-    # 並び替え
     df_log = df_log.sort_values("date")
 
-    # ワイド → ロング変換
-    df_melt = df_log.melt(
-        id_vars="date",
-        value_vars=["日本株", "米国株", "欧・新興国株", "暗号資産", "現金・債券"],
-        var_name="asset_class",
-        value_name="value"
-    )
+    # ✅ ここが核心：日付 × アセットクラスで集計
+    df_grouped = df_log.groupby(["date", "asset_class"])["value_jpy"].sum().reset_index()
 
-    # グラフ作成
+    # グラフ
     fig = px.area(
-        df_melt,
+        df_grouped,
         x="date",
-        y="value",
+        y="value_jpy",
         color="asset_class",
-        title="📈 資産額の推移",
+        title="資産構成の推移",
         color_discrete_map={
             "日本株": "#1f77b4",
             "米国株": "#ff7f0e",
@@ -594,12 +579,12 @@ if not df_log.empty:
         }
     )
 
-    # ここも中に入れる
-    fig.update_traces(opacity=0.9)
+    # 合計ライン（これも再計算）
+    df_total = df_log.groupby("date")["value_jpy"].sum().reset_index()
 
     fig.add_scatter(
-        x=df_log["date"],
-        y=df_log["合計"],
+        x=df_total["date"],
+        y=df_total["value_jpy"],
         mode="lines",
         name="合計",
         line=dict(width=3, color="black")
@@ -609,6 +594,7 @@ if not df_log.empty:
 
 else:
     st.info("まだログがありません")
+
 
 # --- (3) 資産額の表 ---
 st.subheader("📝 保有資産一覧")
