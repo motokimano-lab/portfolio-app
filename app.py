@@ -708,22 +708,13 @@ def load_daily_log_detail():
 
     return df_log
 
-    client = gspread.authorize(creds)
-
-    spreadsheet = client.open("portfolio_data")
-    worksheet = spreadsheet.worksheet("Daily_Log")
-
-    data = worksheet.get_all_records()
-    df_log = pd.DataFrame(data)
-
-    return df_log
 
 df_log = load_daily_log_detail()
 
 if not df_log.empty:
 
-    df_log["date"] = pd.to_datetime(df_log["date"])
-
+    df_log["date"] = pd.to_datetime(df_log["date"]).dt.date
+    
     date_list = sorted(df_log["date"].unique())
 
     col1, col2 = st.columns(2)
@@ -771,5 +762,5 @@ if not df_log.empty:
 else:
     st.info("ログデータがありません")
 
-
+st.write(df_log.head())
 st.write(df_log["date"].unique())
