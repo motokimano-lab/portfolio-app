@@ -772,3 +772,4 @@ else:
     st.info("ログデータがありません")
 
 
+st.write(df_log["date"].unique())
