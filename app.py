@@ -76,6 +76,30 @@ def calc_after_tax_dividend(row):
         return annual_div_jpy if acc_type == "NISA" else annual_div_jpy * (1 - 0.20315)
     return annual_div_jpy * (1 - 0.20315)
 
+def load_daily_log_detail():
+
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+
+    creds_dict = dict(st.secrets["gcp_service_account"])
+
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(
+        creds_dict, scope
+    )
+
+    client = gspread.authorize(creds)
+
+    spreadsheet = client.open("portfolio_data")
+    sheet = spreadsheet.worksheet("Daily_Log")
+
+    data = sheet.get_all_records()
+    df_log = pd.DataFrame(data)
+
+    return df_log
+
+
 # 為替取得
 usd_jpy = get_fx("JPY=X", 150)
 vnd_jpy = get_fx("VNDJPY=X", 0.006)
