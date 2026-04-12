@@ -623,7 +623,7 @@ st.dataframe(df_filtered[["ticker", "display_name", "div_yield", "annual_div_jpy
 
 
 #資産記録
-def save_daily_log(df):
+def save_daily_log_detail(df):
 
     scope = [
         "https://spreadsheets.google.com/feeds",
@@ -641,31 +641,24 @@ def save_daily_log(df):
 
     today = datetime.now().strftime("%Y-%m-%d")
 
-    # ✅ 重複チェック追加
-    existing_dates = sheet.col_values(1)
+    # 👇 1行ずつ追加
+    rows = []
+    for _, r in df.iterrows():
+        rows.append([
+            today,
+            r["ticker"],
+            r["display_name"],
+            r["asset_class"],
+            r["sector"],
+            r["value_jpy"]
+        ])
 
-    if today in existing_dates:
-        return "⚠️ 今日のデータはすでに記録済みです"
+    sheet.append_rows(rows)
 
-    grouped = df.groupby("asset_class")["value_jpy"].sum()
-    total = df["value_jpy"].sum()
-
-    row = [
-        today,
-        grouped.get("日本株", 0),
-        grouped.get("米国株", 0),
-        grouped.get("欧・新興国株", 0),
-        grouped.get("暗号資産", 0),
-        grouped.get("現金・債券", 0),
-        total
-    ]
-
-    sheet.append_row(row)
-
-    return "✅ 保存完了！"
+    return f"{len(rows)} rows saved!"
 
 if st.button("📅 今日の資産を記録"):
-    result = save_daily_log(df_filtered)
+    result = save_daily_log_detail(df_filtered)
     st.success(result)
 
 st.header("📊 期間比較（成長分析）")
