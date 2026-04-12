@@ -632,7 +632,6 @@ def save_daily_log_detail(df):
         "https://www.googleapis.com/auth/drive"
     ]
 
-    # 👇 ここが超重要（これに変更）
     creds_dict = dict(st.secrets["gcp_service_account"])
 
     creds = ServiceAccountCredentials.from_json_keyfile_dict(
@@ -646,21 +645,20 @@ def save_daily_log_detail(df):
 
     today = datetime.now().strftime("%Y-%m-%d")
 
-   rows = [
-for _, r in df.iterrows():
-    rows.append([
-        today,
-        str(r["ticker"]) if pd.notna(r["ticker"]) else "",
-        str(r["display_name"]) if pd.notna(r["display_name"]) else "",
-        str(r["asset_class"]) if pd.notna(r["asset_class"]) else "",
-        str(r["sector"]) if pd.notna(r["sector"]) else "",
-        float(r["value_jpy"]) if pd.notna(r["value_jpy"]) else 0
-    ])
+    rows = []
+    for _, r in df.iterrows():
+        rows.append([
+            today,
+            str(r["ticker"]) if pd.notna(r["ticker"]) else "",
+            str(r["display_name"]) if pd.notna(r["display_name"]) else "",
+            str(r["asset_class"]) if pd.notna(r["asset_class"]) else "",
+            str(r["sector"]) if pd.notna(r["sector"]) else "",
+            float(r["value_jpy"]) if pd.notna(r["value_jpy"]) else 0
+        ])
 
     sheet.append_rows(rows)
 
     return f"{len(rows)} rows saved!"
-
 
 if st.button("📅 今日の資産を記録"):
     result = save_daily_log_detail(df_filtered)
