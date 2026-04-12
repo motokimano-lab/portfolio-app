@@ -677,6 +677,10 @@ if st.button("📅 今日の資産を記録"):
 
 st.write(df_log.head())
 st.write(df_log["date"].unique())
+st.write(df_start.shape)
+st.write(df_end.shape)
+st.write(df_merged.head())
+st.write(df_merged["diff"].describe())
 
 st.header("📊 期間比較（成長分析）")
 
@@ -729,8 +733,9 @@ if not df_log.empty:
     with col2:
         end_date = st.selectbox("終了日", date_list, index=len(date_list)-1)
 
-    df_start = df_log[df_log["date"] == start_date]
-    df_end = df_log[df_log["date"] == end_date]
+    df_start["ticker"] = df_start["ticker"].astype(str).str.strip().str.upper()
+    df_end["ticker"] = df_end["ticker"].astype(str).str.strip().str.upper()
+    df_log["ticker"] = df_log["ticker"].astype(str).str.strip().str.upper()
 
     df_merged = pd.merge(
         df_start,
