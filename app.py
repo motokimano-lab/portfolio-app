@@ -687,7 +687,6 @@ def load_daily_log_detail():
     df_log = pd.DataFrame(data)
 
     return df_log
-    )
 
     client = gspread.authorize(creds)
 
