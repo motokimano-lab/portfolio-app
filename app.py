@@ -570,6 +570,12 @@ else:
     st.info("配当データ（税引後）がありません。")
 
 
+st.write("--- TEST ---")
+st.header("🧪 割り込みテスト")
+test_log = load_daily_log_detail()
+st.write(f"取得データ件数: {len(test_log)}件")
+st.dataframe(test_log.head(3))
+
 # ========= 資産推移（積み上げ面グラフ） =========
 
 st.header("📈 資産推移（構成比）")
