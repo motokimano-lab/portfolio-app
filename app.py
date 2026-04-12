@@ -646,7 +646,7 @@ def save_daily_log_detail(df):
 
     today = datetime.now().strftime("%Y-%m-%d")
 
-   rows = []
+   rows = [
 for _, r in df.iterrows():
     rows.append([
         today,
