@@ -682,6 +682,16 @@ st.write(df_end.shape)
 st.write(df_merged.head())
 st.write(df_merged["diff"].describe())
 
+# --- デバッグ用コード（グラフコードの直前に挿入） ---
+st.write(f"開始日のデータ数: {len(df_start)}")
+st.write(f"終了日のデータ数: {len(df_end)}")
+st.write(f"マージ後のデータ数: {len(df_merged)}")
+
+if not df_merged.empty:
+    st.write("マージ後データの先頭5行:")
+    st.dataframe(df_merged[['ticker', 'value_jpy_start', 'value_jpy_end', 'diff']].head())
+# ----------------------------------------------
+
 st.header("📊 期間比較（成長分析）")
 
 # （中略：load_daily_log_detail関数などはそのまま）
