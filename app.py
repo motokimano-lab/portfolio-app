@@ -16,12 +16,23 @@ st.title("My Portfolio Management")
 
 # ========= 2. 各種データ取得・関数定義 =========
 
-def get_price(ticker):
-    if ticker == "CASH": return 1
+def get_price(ticker, cost_price, fallback_price=None):
+    if ticker == "CASH":
+        return 1
     try:
         stock = yf.Ticker(ticker)
-        return stock.history(period="1d")["Close"].iloc[-1]
-    except: return None
+        hist = stock.history(period="5d")
+
+        if not hist.empty:
+            return hist["Close"].dropna().iloc[-1]
+    except:
+        pass
+
+    # 👇 fallback優先順位
+    if fallback_price is not None:
+        return fallback_price
+
+    return cost_price
 
 def get_fx(symbol, default):
     try:
@@ -72,7 +83,10 @@ vnd_jpy = get_fx("VNDJPY=X", 0.006)
 # ========= 3. メイン計算処理 (すべて先に終わらせる) =========
 
 # 基本数値
-df["price"] = df["ticker"].apply(get_price)
+df["price"] = df.apply(
+    lambda r: get_price(r["ticker"], r["cost_price"], r.get("price")),
+    axis=1
+)
 df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
 df["price"] = pd.to_numeric(df["price"], errors="coerce")
 df["cost_price"] = pd.to_numeric(df["cost_price"], errors="coerce")
