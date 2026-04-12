@@ -684,78 +684,73 @@ st.write("DEBUG: ここまでコードは読み込まれています")
 
 st.header("📊 期間比較（成長分析）")
 
-# df_logが読み込めているか確認
 if 'df_log' in locals() and not df_log.empty:
-    import numpy as np # 空欄処理に使用
+    import numpy as np
     
-    # 1. データのクレンジング
+    # 1. データの準備
     df_comp = df_log.copy()
-    # 数値と日付の強制変換
     df_comp["value_jpy"] = pd.to_numeric(df_comp["value_jpy"], errors='coerce').fillna(0)
     df_comp["date"] = pd.to_datetime(df_comp["date"]).dt.date
     df_comp["ticker"] = df_comp["ticker"].astype(str).str.strip().str.upper()
     
     date_list = sorted(df_comp["date"].unique())
 
-    if len(date_list) < 2:
-        st.info("比較するには2日分以上のログデータが必要です（現在の記録日数は1日分です）。")
-    else:
-        col_date1, col_date2 = st.columns(2)
-        with col_date1:
-            s_date = st.selectbox("比較開始日", date_list, index=0, key="sel_s")
-        with col_date2:
-            e_date = st.selectbox("比較終了日", date_list, index=len(date_list)-1, key="sel_e")
+    if len(date_list) >= 2:
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            s_date = st.selectbox("比較開始日", date_list, index=0, key="growth_s")
+        with col_d2:
+            e_date = st.selectbox("比較終了日", date_list, index=len(date_list)-1, key="growth_e")
 
-        # 2. データの抽出
+        # 2. 抽出とマージ
         d_start = df_comp[df_comp["date"] == s_date].copy()
         d_end = df_comp[df_comp["date"] == e_date].copy()
-
-        # 3. マージ（tickerで紐付け）
+        
         d_merged = pd.merge(
             d_start, d_end, on="ticker", how="outer", suffixes=("_start", "_end")
         ).fillna(0)
 
-        # 4. 指標計算
+        # 3. 計算
         d_merged["diff_val"] = d_merged["value_jpy_end"] - d_merged["value_jpy_start"]
         d_merged["growth_pct"] = d_merged.apply(
             lambda r: 0 if r["value_jpy_start"] == 0 else (r["diff_val"] / r["value_jpy_start"]) * 100,
             axis=1
         )
         
-        # 5. ⚠️ 階層データの穴埋め（これが無いとグラフが消えます）
+        # ✅ 4. 【重要】Plotlyが嫌がる「穴」を徹底的に埋める
         for c in ["display_name", "asset_class", "sector"]:
-            # 終了日のデータが0なら開始日のデータを使う。それでも空なら「未分類」にする
+            # 終了日のデータがなければ開始日のデータを使う
             d_merged[c] = d_merged[f"{c}_end"].replace(0, np.nan).fillna(d_merged[f"{c}_start"])
-            d_merged[c] = d_merged[c].replace(['', ' ', None, 0], '未分類').fillna('未分類')
+            # それでも0やNaNや空文字なら「不明」で埋める（これが無いとグラフが消えます）
+            d_merged[c] = d_merged[c].replace(['', ' ', None, 0], '不明').fillna('不明')
 
-        # 6. グラフ描画（終了日に保有している銘柄のみ）
+        # ✅ 5. 【重要】サイズが0以下のデータを排除し、階層を確実にする
+        # サイズが0だとPlotlyは描画を拒否します
         df_plot = d_merged[d_merged["value_jpy_end"] > 0].copy()
 
         if not df_plot.empty:
+            # 最後に同じ銘柄が複数行にならないよう集計（一意化）
+            df_plot = df_plot.groupby(["asset_class", "sector", "display_name"]).agg({
+                "value_jpy_end": "sum",
+                "growth_pct": "mean",
+                "diff_val": "sum"
+            }).reset_index()
+
             fig_growth = px.treemap(
                 df_plot,
-                path=["asset_class", "sector", "display_name"],
-                values="value_jpy_end",  # ✅ サイズは終了日の資産額
-                color="growth_pct",      # ✅ 色は開始日からの増減率
+                path=["asset_class", "sector", "display_name"], # 階層
+                values="value_jpy_end",  # サイズ＝資産額
+                color="growth_pct",      # 色＝増減率
                 color_continuous_scale=["red", "lightgray", "green"],
                 color_continuous_midpoint=0,
-                range_color=[-5, 5],     # 色の感度（±5%）
-                title=f"資産構成と成長率 ({e_date}時点, {s_date}比)",
-                hover_data={
-                    "value_jpy_end": ":,.0f",
-                    "diff_val": ":+,.0f",
-                    "growth_pct": ":+.2f%"
-                }
+                range_color=[-10, 10],   # 色の範囲を±10%に固定
+                title=f"資産増減分析 ({e_date}時点)",
+                hover_data={"value_jpy_end": ":,.0f", "diff_val": ":+,.0f", "growth_pct": ":+.2f%"}
             )
             fig_growth.update_layout(height=600, margin=dict(t=40, b=0, l=10, r=10))
-            st.plotly_chart(fig_growth, use_container_width=True, key="growth_tree_final")
+            st.plotly_chart(fig_growth, use_container_width=True)
         else:
-            st.warning("選択された終了日に表示できる資産データがありません。")
-
-        # 7. デバッグ情報の表示（折り畳み）
-        with st.expander("🛠 データの中身を確認する"):
-            st.write(f"開始日({s_date}): {len(d_start)}件 / 終了日({e_date}): {len(d_end)}件")
-            st.dataframe(d_merged[['ticker', 'display_name', 'value_jpy_start', 'value_jpy_end', 'growth_pct']])
+            st.warning("表示できる資産データ（評価額が0より大きいもの）がありません。")
 
 else:
-    st.info("比較用のログデータが読み込めていません。スプレッドシートの 'Daily_Log' シートを確認してください。")
+    st.info("比較用のデータが読み込めていません。")
