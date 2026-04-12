@@ -676,83 +676,80 @@ if st.button("📅 今日の資産を記録"):
     
 st.write("DEBUG: ここまでコードは読み込まれています")
 
-# --- (7) 期間比較（成長分析）：ここから最後までを入れ替え ---
-st.markdown("---")
 st.header("📊 期間比較（成長分析）")
 
-# df_log が空でないことを確認
+# df_logが読み込めているか確認
 if 'df_log' in locals() and not df_log.empty:
-    try:
-        # 1. データのクレンジング
-        df_comp = df_log.copy()
+    import numpy as np # 空欄処理に使用
+    
+    # 1. データのクレンジング
+    df_comp = df_log.copy()
+    # 数値と日付の強制変換
+    df_comp["value_jpy"] = pd.to_numeric(df_comp["value_jpy"], errors='coerce').fillna(0)
+    df_comp["date"] = pd.to_datetime(df_comp["date"]).dt.date
+    df_comp["ticker"] = df_comp["ticker"].astype(str).str.strip().str.upper()
+    
+    date_list = sorted(df_comp["date"].unique())
+
+    if len(date_list) < 2:
+        st.info("比較するには2日分以上のログデータが必要です（現在の記録日数は1日分です）。")
+    else:
+        col_date1, col_date2 = st.columns(2)
+        with col_date1:
+            s_date = st.selectbox("比較開始日", date_list, index=0, key="sel_s")
+        with col_date2:
+            e_date = st.selectbox("比較終了日", date_list, index=len(date_list)-1, key="sel_e")
+
+        # 2. データの抽出
+        d_start = df_comp[df_comp["date"] == s_date].copy()
+        d_end = df_comp[df_comp["date"] == e_date].copy()
+
+        # 3. マージ（tickerで紐付け）
+        d_merged = pd.merge(
+            d_start, d_end, on="ticker", how="outer", suffixes=("_start", "_end")
+        ).fillna(0)
+
+        # 4. 指標計算
+        d_merged["diff_val"] = d_merged["value_jpy_end"] - d_merged["value_jpy_start"]
+        d_merged["growth_pct"] = d_merged.apply(
+            lambda r: 0 if r["value_jpy_start"] == 0 else (r["diff_val"] / r["value_jpy_start"]) * 100,
+            axis=1
+        )
         
-        # 数値と日付の強制変換（ここが重要！）
-        df_comp["value_jpy"] = pd.to_numeric(df_comp["value_jpy"], errors='coerce').fillna(0)
-        df_comp["date"] = pd.to_datetime(df_comp["date"]).dt.date
-        df_comp["ticker"] = df_comp["ticker"].astype(str).str.strip().str.upper()
-        
-        date_list = sorted(df_comp["date"].unique())
+        # 5. ⚠️ 階層データの穴埋め（これが無いとグラフが消えます）
+        for c in ["display_name", "asset_class", "sector"]:
+            # 終了日のデータが0なら開始日のデータを使う。それでも空なら「未分類」にする
+            d_merged[c] = d_merged[f"{c}_end"].replace(0, np.nan).fillna(d_merged[f"{c}_start"])
+            d_merged[c] = d_merged[c].replace(['', ' ', None, 0], '未分類').fillna('未分類')
 
-        if len(date_list) < 2:
-            st.warning(f"ログデータが不足しています（現在の日付数: {len(date_list)}）。2日分以上のデータが必要です。")
-        else:
-            col_date1, col_date2 = st.columns(2)
-            with col_date1:
-                s_date = st.selectbox("比較開始日", date_list, index=0, key="sb_start")
-            with col_date2:
-                e_date = st.selectbox("比較終了日", date_list, index=len(date_list)-1, key="sb_end")
+        # 6. グラフ描画（終了日に保有している銘柄のみ）
+        df_plot = d_merged[d_merged["value_jpy_end"] > 0].copy()
 
-            # 2. データの抽出
-            d_start = df_comp[df_comp["date"] == s_date].copy()
-            d_end = df_comp[df_comp["date"] == e_date].copy()
-
-            # 3. マージ
-            d_merged = pd.merge(
-                d_start, d_end, on="ticker", how="outer", suffixes=("_start", "_end")
-            ).fillna(0)
-
-            # 4. 計算
-            d_merged["diff_val"] = d_merged["value_jpy_end"] - d_merged["value_jpy_start"]
-            d_merged["growth_pct"] = d_merged.apply(
-                lambda r: 0 if r["value_jpy_start"] == 0 else (r["diff_val"] / r["value_jpy_start"]) * 100,
-                axis=1
+        if not df_plot.empty:
+            fig_growth = px.treemap(
+                df_plot,
+                path=["asset_class", "sector", "display_name"],
+                values="value_jpy_end",  # ✅ サイズは終了日の資産額
+                color="growth_pct",      # ✅ 色は開始日からの増減率
+                color_continuous_scale=["red", "lightgray", "green"],
+                color_continuous_midpoint=0,
+                range_color=[-5, 5],     # 色の感度（±5%）
+                title=f"資産構成と成長率 ({e_date}時点, {s_date}比)",
+                hover_data={
+                    "value_jpy_end": ":,.0f",
+                    "diff_val": ":+,.0f",
+                    "growth_pct": ":+.2f%"
+                }
             )
+            fig_growth.update_layout(height=600, margin=dict(t=40, b=0, l=10, r=10))
+            st.plotly_chart(fig_growth, use_container_width=True, key="growth_tree_final")
+        else:
+            st.warning("選択された終了日に表示できる資産データがありません。")
 
-            # 5. 表示名と階層の補完
-            for c in ["display_name", "asset_class", "sector"]:
-                d_merged[c] = d_merged[f"{c}_end"].where(d_merged[f"{c}_end"] != 0, d_merged[f"{c}_start"])
+        # 7. デバッグ情報の表示（折り畳み）
+        with st.expander("🛠 データの中身を確認する"):
+            st.write(f"開始日({s_date}): {len(d_start)}件 / 終了日({e_date}): {len(d_end)}件")
+            st.dataframe(d_merged[['ticker', 'display_name', 'value_jpy_start', 'value_jpy_end', 'growth_pct']])
 
-            # 6. グラフ描画
-            if not d_end.empty and d_merged["value_jpy_end"].sum() > 0:
-                fig_growth = px.treemap(
-                    d_merged[d_merged["value_jpy_end"] > 0],
-                    path=["asset_class", "sector", "display_name"],
-                    values="value_jpy_end",
-                    color="growth_pct",
-                    color_continuous_scale=["red", "lightgray", "green"],
-                    color_continuous_midpoint=0,
-                    title=f"{e_date} 時点の資産構成（色は {s_date} からの増減率）",
-                    hover_data={"value_jpy_end": ":,.0f", "diff_val": ":+,.0f", "growth_pct": ":+.2f%"}
-                )
-                fig_growth.update_layout(height=600, margin=dict(t=40, b=0, l=10, r=10))
-                st.plotly_chart(fig_growth, use_container_width=True, key="growth_tree_final")
-            else:
-                st.error("表示できるデータがありません。終了日の評価額が0になっていないか確認してください。")
-
-            # 7. デバッグ（何があっても表示されるように try の外ではなく中に置く）
-            with st.expander("🛠 データの中身を確認する"):
-                st.write(f"開始日({s_date}): {len(d_start)}件")
-                st.write(f"終了日({e_date}): {len(d_end)}件")
-                st.dataframe(d_merged[['ticker', 'value_jpy_start', 'value_jpy_end', 'diff_val']])
-
-    except Exception as e:
-        st.error(f"プログラム実行中にエラーが発生しました: {e}")
 else:
-    st.info("比較用のログデータが読み込めていません。")
-
-st.markdown("---")
-st.header("🛠 超簡易チェック")
-df_test = load_daily_log_detail() # 関数を直接叩く
-st.write("スプシから読み込んだ生データ:", df_test.head())
-if not df_test.empty:
-    st.success(f"データは {len(df_test)} 件読み込めています！")
+    st.info("比較用のログデータが読み込めていません。スプレッドシートの 'Daily_Log' シートを確認してください。")
