@@ -623,6 +623,8 @@ st.dataframe(df_filtered[["ticker", "display_name", "div_yield", "annual_div_jpy
 
 
 #資産記録
+import json
+
 def save_daily_log_detail(df):
 
     scope = [
@@ -630,8 +632,11 @@ def save_daily_log_detail(df):
         "https://www.googleapis.com/auth/drive"
     ]
 
-    creds = ServiceAccountCredentials.from_json_keyfile_name(
-        "credentials.json", scope
+    # 👇 ここが超重要（これに変更）
+    creds_dict = dict(st.secrets["gcp_service_account"])
+
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(
+        creds_dict, scope
     )
 
     client = gspread.authorize(creds)
@@ -641,7 +646,6 @@ def save_daily_log_detail(df):
 
     today = datetime.now().strftime("%Y-%m-%d")
 
-    # 👇 1行ずつ追加
     rows = []
     for _, r in df.iterrows():
         rows.append([
@@ -656,6 +660,7 @@ def save_daily_log_detail(df):
     sheet.append_rows(rows)
 
     return f"{len(rows)} rows saved!"
+
 
 if st.button("📅 今日の資産を記録"):
     result = save_daily_log_detail(df_filtered)
