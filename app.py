@@ -749,3 +749,10 @@ if 'df_log' in locals() and not df_log.empty:
         st.error(f"プログラム実行中にエラーが発生しました: {e}")
 else:
     st.info("比較用のログデータが読み込めていません。")
+
+st.markdown("---")
+st.header("🛠 超簡易チェック")
+df_test = load_daily_log_detail() # 関数を直接叩く
+st.write("スプシから読み込んだ生データ:", df_test.head())
+if not df_test.empty:
+    st.success(f"データは {len(df_test)} 件読み込めています！")
