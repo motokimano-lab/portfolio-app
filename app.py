@@ -684,6 +684,12 @@ if not df_log.empty:
     df_compare = df_log.copy()
     df_compare["date"] = pd.to_datetime(df_compare["date"]).dt.date
     df_compare["ticker"] = df_compare["ticker"].astype(str).str.strip().str.upper()
+    # --- ここを追加：数値への強制変換 ---
+    df_compare["value_jpy"] = pd.to_numeric(df_compare["value_jpy"], errors='coerce').fillna(0)
+    
+    # 念のため日付も再確認
+    df_compare["date"] = pd.to_datetime(df_compare["date"]).dt.date
+    # ------------------------------
     
     date_list = sorted(df_compare["date"].unique())
 
