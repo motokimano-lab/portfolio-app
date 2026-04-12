@@ -685,9 +685,10 @@ st.write("DEBUG: ここまでコードは読み込まれています")
 st.header("📊 期間比較（成長分析）")
 
 if 'df_log' in locals() and not df_log.empty:
+    import plotly.graph_objects as go
     import numpy as np
-    
-    # 1. データの準備
+
+    # 1. データのクレンジング
     df_comp = df_log.copy()
     df_comp["value_jpy"] = pd.to_numeric(df_comp["value_jpy"], errors='coerce').fillna(0)
     df_comp["date"] = pd.to_datetime(df_comp["date"]).dt.date
@@ -705,61 +706,55 @@ if 'df_log' in locals() and not df_log.empty:
         # 2. 抽出とマージ
         d_start = df_comp[df_comp["date"] == s_date].copy()
         d_end = df_comp[df_comp["date"] == e_date].copy()
-        
-        d_merged = pd.merge(
-            d_start, d_end, on="ticker", how="outer", suffixes=("_start", "_end")
-        ).fillna(0)
+        d_merged = pd.merge(d_start, d_end, on="ticker", how="outer", suffixes=("_start", "_end")).fillna(0)
 
-        # 3. 計算
+        # 3. 指標計算
         d_merged["diff_val"] = d_merged["value_jpy_end"] - d_merged["value_jpy_start"]
-        d_merged["growth_pct"] = d_merged.apply(
-            lambda r: 0 if r["value_jpy_start"] == 0 else (r["diff_val"] / r["value_jpy_start"]) * 100,
-            axis=1
-        )
+        d_merged["growth_pct"] = d_merged.apply(lambda r: 0 if r["value_jpy_start"] == 0 else (r["diff_val"] / r["value_jpy_start"]) * 100, axis=1)
         
-        # ✅ 4. 階層データの「空欄」と「階層の深さ」を調整
-        # PlotlyはNaNがあると描画を止めるので、まずは全ての空欄を埋める
-        for c in ["asset_class", "sector", "display_name"]:
-            d_merged[c] = d_merged[f"{c}_end"].replace([0, '', ' ', None], np.nan).fillna(d_merged[f"{c}_start"])
-            d_merged[c] = d_merged[c].fillna("未分類")
+        # 基本情報の補完
+        for c in ["display_name", "asset_class", "sector"]:
+            d_merged[c] = d_merged[f"{c}_end"].replace(0, np.nan).fillna(d_merged[f"{c}_start"])
+            d_merged[c] = d_merged[c].replace(['', ' ', None, 0], '未分類').fillna('未分類')
 
-        # ✅ 5. 階層の調整（セクターが空欄のものをアセットクラス名で埋める）
-        # 日本株と現金・債券以外でセクターが「未分類」になっている場合、
-        # 階層を壊さないためにアセットクラス名をコピーして「中継地点」を作ります
-        def fix_path(row):
-            if row["asset_class"] in ["日本株", "現金・債券"]:
-                return row["sector"]
+        # 4. グラフ用データの構築（px.treemapを使わず、手動で構築）
+        # 終了日に保有しているものに限定
+        df_p = d_merged[d_merged["value_jpy_end"] > 0].copy()
+        
+        ids, parents, labels, values, colors = [], [], [], [], []
+        root_id = "Growth_Root"
+        ids.append(root_id); parents.append(""); labels.append("ポートフォリオ"); values.append(0); colors.append(0)
+
+        # (A) 資産クラス
+        for ac in df_p["asset_class"].unique():
+            ids.append(ac); parents.append(root_id); labels.append(ac); values.append(0); colors.append(df_p[df_p["asset_class"] == ac]["growth_pct"].mean())
+            
+            # (B) セクター (日本株と現金・債券のみ)
+            df_ac = df_p[df_p["asset_class"] == ac]
+            if ac in ["日本株", "現金・債券"]:
+                for sector in df_ac["sector"].unique():
+                    sect_id = f"{ac}-{sector}"
+                    ids.append(sect_id); parents.append(ac); labels.append(sector); values.append(0); colors.append(df_ac[df_ac["sector"] == sector]["growth_pct"].mean())
+                    
+                    # (C) 銘柄 (セクターあり)
+                    df_s = df_ac[df_ac["sector"] == sector]
+                    for _, r in df_s.iterrows():
+                        ids.append(f"item-{r['ticker']}"); parents.append(sect_id); labels.append(r["display_name"]); values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
             else:
-                # 日本株ら以外は、セクター列をアセットクラス名と同じにする（階層を実質1つ減らす効果）
-                return row["asset_class"]
+                # (C) 銘柄 (セクターなし：直接アセットクラスに紐付け)
+                for _, r in df_ac.iterrows():
+                    ids.append(f"item-{r['ticker']}"); parents.append(ac); labels.append(r["display_name"]); values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
 
-        d_merged["sector_adj"] = d_merged.apply(fix_path, axis=1)
-
-        # ✅ 6. グラフ描画
-        df_plot = d_merged[d_merged["value_jpy_end"] > 0].copy()
-
-        if not df_plot.empty:
-            fig_growth = px.treemap(
-                df_plot,
-                # sector の代わりに sector_adj を使うことで、
-                # 日本株以外は [Asset] -> [Asset] -> [Name] となり、見た目上の階層が揃う
-                path=["asset_class", "sector_adj", "display_name"],
-                values="value_jpy_end",
-                color="growth_pct",
-                color_continuous_scale=["red", "lightgray", "green"],
-                color_continuous_midpoint=0,
-                range_color=[-5, 5],
-                title=f"資産増減マップ: {s_date} → {e_date}",
-                hover_data={
-                    "value_jpy_end": ":,.0f",
-                    "diff_val": ":+,.0f",
-                    "growth_pct": ":+.2f%",
-                    "sector_adj": False # 調整用列は見せない
-                }
-            )
-            fig_growth.update_layout(height=600, margin=dict(t=40, b=0, l=10, r=10))
-            st.plotly_chart(fig_growth, use_container_width=True, key="growth_tree_final")
-        else:
+        # 5. 描画
+        fig = go.Figure(go.Treemap(
+            ids=ids, parents=parents, labels=labels, values=values,
+            marker=dict(colors=colors, colorscale=["red", "lightgray", "green"], cmid=0, cmin=-5, cmax=5),
+            hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>増減率: %{color:.2f}%<extra></extra>",
+            texttemplate="<b>%{label}</b><br>%{color:.2f}%"
+        ))
+        fig.update_layout(height=600, margin=dict(t=30, b=10, l=10, r=10))
+        st.plotly_chart(fig, use_container_width=True)
+    else:
             st.warning("表示できる資産データ（評価額が0より大きいもの）がありません。")
 
 else:
