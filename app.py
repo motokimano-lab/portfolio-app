@@ -717,38 +717,48 @@ if 'df_log' in locals() and not df_log.empty:
             axis=1
         )
         
-        # ✅ 4. 【重要】Plotlyが嫌がる「穴」を徹底的に埋める
-        for c in ["display_name", "asset_class", "sector"]:
-            # 終了日のデータがなければ開始日のデータを使う
-            d_merged[c] = d_merged[f"{c}_end"].replace(0, np.nan).fillna(d_merged[f"{c}_start"])
-            # それでも0やNaNや空文字なら「不明」で埋める（これが無いとグラフが消えます）
-            d_merged[c] = d_merged[c].replace(['', ' ', None, 0], '不明').fillna('不明')
+        # ✅ 4. 階層データの「空欄」と「階層の深さ」を調整
+        # PlotlyはNaNがあると描画を止めるので、まずは全ての空欄を埋める
+        for c in ["asset_class", "sector", "display_name"]:
+            d_merged[c] = d_merged[f"{c}_end"].replace([0, '', ' ', None], np.nan).fillna(d_merged[f"{c}_start"])
+            d_merged[c] = d_merged[c].fillna("未分類")
 
-        # ✅ 5. 【重要】サイズが0以下のデータを排除し、階層を確実にする
-        # サイズが0だとPlotlyは描画を拒否します
+        # ✅ 5. 階層の調整（セクターが空欄のものをアセットクラス名で埋める）
+        # 日本株と現金・債券以外でセクターが「未分類」になっている場合、
+        # 階層を壊さないためにアセットクラス名をコピーして「中継地点」を作ります
+        def fix_path(row):
+            if row["asset_class"] in ["日本株", "現金・債券"]:
+                return row["sector"]
+            else:
+                # 日本株ら以外は、セクター列をアセットクラス名と同じにする（階層を実質1つ減らす効果）
+                return row["asset_class"]
+
+        d_merged["sector_adj"] = d_merged.apply(fix_path, axis=1)
+
+        # ✅ 6. グラフ描画
         df_plot = d_merged[d_merged["value_jpy_end"] > 0].copy()
 
         if not df_plot.empty:
-            # 最後に同じ銘柄が複数行にならないよう集計（一意化）
-            df_plot = df_plot.groupby(["asset_class", "sector", "display_name"]).agg({
-                "value_jpy_end": "sum",
-                "growth_pct": "mean",
-                "diff_val": "sum"
-            }).reset_index()
-
             fig_growth = px.treemap(
                 df_plot,
-                path=["asset_class", "sector", "display_name"], # 階層
-                values="value_jpy_end",  # サイズ＝資産額
-                color="growth_pct",      # 色＝増減率
+                # sector の代わりに sector_adj を使うことで、
+                # 日本株以外は [Asset] -> [Asset] -> [Name] となり、見た目上の階層が揃う
+                path=["asset_class", "sector_adj", "display_name"],
+                values="value_jpy_end",
+                color="growth_pct",
                 color_continuous_scale=["red", "lightgray", "green"],
                 color_continuous_midpoint=0,
-                range_color=[-10, 10],   # 色の範囲を±10%に固定
-                title=f"資産増減分析 ({e_date}時点)",
-                hover_data={"value_jpy_end": ":,.0f", "diff_val": ":+,.0f", "growth_pct": ":+.2f%"}
+                range_color=[-5, 5],
+                title=f"資産増減マップ: {s_date} → {e_date}",
+                hover_data={
+                    "value_jpy_end": ":,.0f",
+                    "diff_val": ":+,.0f",
+                    "growth_pct": ":+.2f%",
+                    "sector_adj": False # 調整用列は見せない
+                }
             )
             fig_growth.update_layout(height=600, margin=dict(t=40, b=0, l=10, r=10))
-            st.plotly_chart(fig_growth, use_container_width=True)
+            st.plotly_chart(fig_growth, use_container_width=True, key="growth_tree_final")
         else:
             st.warning("表示できる資産データ（評価額が0より大きいもの）がありません。")
 
