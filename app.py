@@ -673,6 +673,8 @@ def save_daily_log_detail(df):
 if st.button("📅 今日の資産を記録"):
     result = save_daily_log_detail(df_filtered)
     st.success(result)
+    
+st.write("DEBUG: ここまでコードは読み込まれています")
 
 # --- (7) 期間比較（成長分析）：ここから最後までを入れ替え ---
 st.markdown("---")
