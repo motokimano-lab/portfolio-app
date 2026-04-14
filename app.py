@@ -779,7 +779,7 @@ if 'df_log' in locals() and not df_log.empty:
         ))
         fig.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
         st.plotly_chart(fig, use_container_width=True, key="growth_treemap_final")
-         else:
+             else:
                 # (C) 銘柄 (セクターなし：直接アセットクラスに紐付け)
                 for _, r in df_ac.iterrows():
                     ids.append(f"item-{r['ticker']}"); parents.append(ac); labels.append(r["display_name"]); values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
