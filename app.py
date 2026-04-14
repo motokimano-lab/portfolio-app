@@ -748,7 +748,7 @@ if 'df_log' in locals() and not df_log.empty:
                         g_val = 0 if np.isnan(r["growth_pct"]) else r["growth_pct"]
                         colors.append(g_val)
                         hover_texts.append(f"{r['display_name']}<br>増減: {r['diff_val']:+,.0f}円")
-            else:
+           else:
                 # 【2階層パターン】資産 -> 銘柄（米国株、暗号資産など）
                 for _, r in df_ac.iterrows():
                     ids.append(f"{ac}-{r['ticker']}"); parents.append(ac)
