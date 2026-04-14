@@ -702,7 +702,7 @@ if len(date_list) >= 2:
         d_end = df_comp[df_comp["date"] == e_date].copy()
         d_merged = pd.merge(d_start, d_end, on="ticker", how="outer", suffixes=("_start", "_end")).fillna(0)
 
-        # 2. 指標計算とクレンジング
+        # 2. 指標計算
         d_merged["diff_val"] = d_merged["value_jpy_end"] - d_merged["value_jpy_start"]
         d_merged["growth_pct"] = d_merged.apply(lambda r: 0 if r["value_jpy_start"] == 0 else (r["diff_val"] / r["value_jpy_start"]) * 100, axis=1)
         
@@ -710,7 +710,7 @@ if len(date_list) >= 2:
             d_merged[c] = d_merged[f"{c}_end"].replace(0, np.nan).fillna(d_merged[f"{c}_start"])
             d_merged[c] = d_merged[c].replace(['', ' ', None, 0], '未分類').fillna('未分類')
 
-        # 3. グラフ用データの構築（ここですべての ID リストを完成させる）
+        # 3. グラフデータの構築
         df_p = d_merged[d_merged["value_jpy_end"] > 0].copy()
         ids, parents, labels, values, colors, hover_texts = [], [], [], [], [], []
         root_id = "Portfolio_Root"
@@ -719,12 +719,11 @@ if len(date_list) >= 2:
         if not df_p.empty:
             for ac in df_p["asset_class"].unique():
                 ids.append(ac); parents.append(root_id); labels.append(ac); values.append(0)
-                ac_growth = df_p[df_p["asset_class"] == ac]["growth_pct"].mean()
+                ac_growth = df_ac_mean = df_p[df_p["asset_class"] == ac]["growth_pct"].mean()
                 colors.append(ac_growth); hover_texts.append(f"{ac}: {ac_growth:.2f}%")
                 
                 df_ac = df_p[df_p["asset_class"] == ac]
 
-                # --- 階層の条件分岐 ---
                 if ac in ["日本株", "現金・債券"]:
                     for sector in df_ac["sector"].unique():
                         sect_id = f"{ac}-{sector}"
@@ -739,17 +738,16 @@ if len(date_list) >= 2:
                             g_val = 0 if np.isnan(r["growth_pct"]) else r["growth_pct"]
                             colors.append(g_val); hover_texts.append(f"{r['display_name']}<br>増減: {r['diff_val']:+,.0f}円")
                 else:
-                    # 米国株などは直接アセットに紐付け（ここが else！）
                     for _, r in df_ac.iterrows():
                         ids.append(f"{ac}-{r['ticker']}"); parents.append(ac)
                         labels.append(r["display_name"]); values.append(r["value_jpy_end"])
                         g_val = 0 if np.isnan(r["growth_pct"]) else r["growth_pct"]
                         colors.append(g_val); hover_texts.append(f"{r['display_name']}<br>増減: {r['diff_val']:+,.0f}円")
 
-            # --- 4. 描画（ループが全部終わってから1回だけ実行） ---
+            # 4. 描画
             fig = go.Figure(go.Treemap(
                 ids=ids, parents=parents, labels=labels, values=values,
-                marker=dict(colors=colors, colorscale=["red", "lightgray", "green"], cmid=0, cmin=-5, cmax=5, colorbar=dict(title="増減率 (%)")),
+                marker=dict(colors=colors, colorscale=["red", "lightgray", "green"], cmid=0, cmin=-5, cmax=5),
                 hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>増減率: %{color:.2f}%<br>%{customdata}<extra></extra>",
                 customdata=hover_texts,
                 texttemplate="<b>%{label}</b><br>%{color:.2f}%",
@@ -761,7 +759,5 @@ if len(date_list) >= 2:
             st.warning("表示できる資産データがありません。")
 
     else:
+        # 👈 ここが Line 763 付近の else です！
         st.info("比較するには2日分以上のログデータが必要です。")
-
-else:
-    st.info("比較用のデータが読み込めていません。")
