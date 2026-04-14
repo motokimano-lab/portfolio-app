@@ -677,122 +677,67 @@ if st.button("📅 今日の資産を記録"):
 
 st.header("📊 期間比較（成長分析）")
 
-if 'df_log' in locals() and not df_log.empty:
-    import plotly.graph_objects as go
-    import numpy as np
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
 
-    # 1. データのクレンジング
-    df_comp = df_log.copy()
-    df_comp["value_jpy"] = pd.to_numeric(df_comp["value_jpy"], errors='coerce').fillna(0)
-    df_comp["date"] = pd.to_datetime(df_comp["date"]).dt.date
-    df_comp["ticker"] = df_comp["ticker"].astype(str).str.strip().str.upper()
+# --- データの事前集計（重複回避） ---
+# スプシから読み込んだ生データを一度、銘柄・セクター単位でギュッとまとめます
+df_sum = df.groupby(['asset_class', 'sector', 'display_name']).agg({
+    'current_value': 'sum',
+    'previous_value': 'sum'
+}).reset_index()
+
+# 騰落率の計算
+df_sum['growth_rate'] = ((df_sum['current_value'] / df_sum['previous_value']) - 1) * 100
+df_sum['growth_rate'] = df_sum['growth_rate'].replace([np.inf, -np.inf], np.nan).fillna(0)
+
+# --- ツリーマップ用データの構築 ---
+labels = []
+parents = []
+values = []
+colors = []
+
+# 1. アセットクラス階層
+for ac in df_sum['asset_class'].unique():
+    ac_data = df_sum[df_sum['asset_class'] == ac]
+    labels.append(ac)
+    parents.append("")
+    values.append(ac_data['current_value'].sum())
+    # 親の騰落率は加重平均で計算
+    ac_growth = ((ac_data['current_value'].sum() / ac_data['previous_value'].sum()) - 1) * 100 if ac_data['previous_value'].sum() != 0 else 0
+    colors.append(ac_growth)
     
-    date_list = sorted(df_comp["date"].unique())
-
-    if len(date_list) >= 2:
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
-            s_date = st.selectbox("比較開始日", date_list, index=0, key="growth_s")
-        with col_d2:
-            e_date = st.selectbox("比較終了日", date_list, index=len(date_list)-1, key="growth_e")
-
-        # 抽出とマージ
-        d_start = df_comp[df_comp["date"] == s_date].copy()
-        d_end = df_comp[df_comp["date"] == e_date].copy()
-        d_merged = pd.merge(d_start, d_end, on="ticker", how="outer", suffixes=("_start", "_end")).fillna(0)
-
-        # 指標計算とクレンジング
-        d_merged["diff_val"] = d_merged["value_jpy_end"] - d_merged["value_jpy_start"]
-        d_merged["growth_pct"] = d_merged.apply(lambda r: 0 if r["value_jpy_start"] == 0 else (r["diff_val"] / r["value_jpy_start"]) * 100, axis=1)
+    # 2. セクター階層
+    for sec in ac_data['sector'].unique():
+        sec_label = f"{ac} - {sec}"
+        sec_data = ac_data[ac_data['sector'] == sec]
+        labels.append(sec)
+        parents.append(ac)
+        values.append(sec_data['current_value'].sum())
+        sec_growth = ((sec_data['current_value'].sum() / sec_data['previous_value'].sum()) - 1) * 100 if sec_data['previous_value'].sum() != 0 else 0
+        colors.append(sec_growth)
         
-        for c in ["display_name", "asset_class", "sector"]:
-            d_merged[c] = d_merged[f"{c}_end"].replace([0, '', ' ', None], np.nan).fillna(d_merged[f"{c}_start"])
-            d_merged[c] = d_merged[c].replace([0, '', ' ', None], '未分類').fillna('未分類')
+        # 3. 銘柄階層
+        for _, row in sec_data.iterrows():
+            labels.append(row['display_name'])
+            parents.append(sec)
+            values.append(row['current_value'])
+            colors.append(row['growth_rate'])
 
-        # 2. グラフデータの構築（銘柄名で集計して重複を排除）
-        df_p = d_merged[d_merged["value_jpy_end"] > 0].copy()
-        
-        # ✅ 【追加】同じ表示名、同じアセットクラス、同じセクターの銘柄を合算
-        # これにより、別名義や別口座で持っている同じ銘柄が一つにまとまります
-        df_p_grouped = df_p.groupby(["asset_class", "sector", "display_name"], dropna=False).agg({
-            "value_jpy_start": "sum",
-            "value_jpy_end": "sum",
-            "diff_val": "sum"
-        }).reset_index()
+# --- 描画 ---
+fig_growth = go.Figure(go.Treemap(
+    labels=labels,
+    parents=parents,
+    values=values,
+    marker=dict(
+        colors=colors,
+        colorscale='RdYlGn',
+        cmid=0,
+        colorbar=dict(title="騰落率 (%)")
+    ),
+    hovertemplate="<b>%{label}</b><br>現在資産: %{value:,.0f}円<br>騰落率: %{color:.2f}%<extra></extra>",
+    texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{color:.2f}%",
+))
 
-        # ✅ 【追加】集計後のデータで成長率を再計算
-        df_p_grouped["growth_pct"] = df_p_grouped.apply(
-            lambda r: 0 if r["value_jpy_start"] == 0 else (r["diff_val"] / r["value_jpy_start"]) * 100, 
-            axis=1
-        )
-
-        ids, parents, labels, values, colors, hover_texts = [], [], [], [], [], []
-        root_id = "Growth_Root"
-        ids.append(root_id); parents.append(""); labels.append(f"期間: {s_date} → {e_date}"); values.append(0); colors.append(0); hover_texts.append("ポートフォリオ全体")
-
-        if not df_p_grouped.empty:
-            for ac in df_p_grouped["asset_class"].unique():
-                ac_id = f"ac_g|{ac}"
-                ids.append(ac_id); parents.append(root_id); labels.append(ac); values.append(0)
-                
-                # アセットクラス単位での騰落率（加重平均的な計算）
-                ac_data = df_p_grouped[df_p_grouped["asset_class"] == ac]
-                ac_start = ac_data["value_jpy_start"].sum()
-                ac_diff = ac_data["diff_val"].sum()
-                ac_growth = (ac_diff / ac_start * 100) if ac_start != 0 else 0
-                colors.append(ac_growth); hover_texts.append(f"{ac}")
-                
-                if ac in ["日本株", "現金・債券"]:
-                    for sector in ac_data["sector"].unique():
-                        sect_id = f"sect_g|{ac}|{sector}"
-                        ids.append(sect_id); parents.append(ac_id); labels.append(sector); values.append(0)
-                        
-                        s_data = ac_data[ac_data["sector"] == sector]
-                        s_start = s_data["value_jpy_start"].sum()
-                        s_diff = s_data["diff_val"].sum()
-                        s_growth = (s_diff / s_start * 100) if s_start != 0 else 0
-                        colors.append(s_growth); hover_texts.append(f"{sector}")
-                        
-                        for _, r in s_data.iterrows():
-                            # IDに ac と sector を含めることで完全ユニーク化
-                            item_id = f"item_g|{r['display_name']}|{sect_id}"
-                            ids.append(item_id); parents.append(sect_id); labels.append(r["display_name"])
-                            values.append(max(0, r["value_jpy_end"]))
-                            colors.append(r["growth_pct"])
-                            hover_texts.append(f"{r['display_name']}<br>増減額: {r['diff_val']:+,.0f}円")
-                else:
-                    for _, r in ac_data.iterrows():
-                        item_id = f"item_g|{r['display_name']}|{ac_id}"
-                        ids.append(item_id); parents.append(ac_id); labels.append(r["display_name"])
-                        values.append(max(0, r["value_jpy_end"]))
-                        colors.append(r["growth_pct"])
-                        hover_texts.append(f"{r['display_name']}<br>増減額: {r['diff_val']:+,.0f}円")
-
-            # 3. 描画（NaN%対策版）
-            fig_growth = go.Figure(go.Treemap(
-                ids=ids, 
-                parents=parents, 
-                labels=labels, 
-                values=values,
-                # markerのcolorsに渡しているリストを明示的に指定
-                marker=dict(
-                    colors=colors, 
-                    colorscale=["red", "lightgray", "green"], 
-                    cmid=0, cmin=-10, cmax=10,
-                    colorbar=dict(title="増減率 (%)")
-                ),
-                # %{color} が marker[colors] を参照するように設定
-                hovertemplate="<b>%{label}</b><br>現在資産: %{value:,.0f}円<br>期間増減率: %{color:.2f}%<br>%{customdata}<extra></extra>",
-                customdata=hover_texts,
-                # ここの %{color} を確実に数値として表示させる設定に変更
-                texttemplate="<b>%{label}</b><br>%{color:.2f}%",
-            ))
-            fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
-            # 念のため、表示直前に NaN が混じっていないか最終チェック（もしNaNなら0にする）
-            fig_growth.update_traces(marker_colors=[0 if np.isnan(c) else c for c in colors])
-            
-            st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_no_nan")
-        else:
-            st.warning("表示できる比較データがありません。")
-    else:
-        st.info("比較するには2日分以上のログデータが必要です。")
+st.plotly_chart(fig_growth, use_container_width=True)
