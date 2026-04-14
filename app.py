@@ -758,6 +758,6 @@ if len(date_list) >= 2:
         else:
             st.warning("表示できる資産データがありません。")
 
-    else:
+else:
         # 👈 ここが Line 763 付近の else です！
         st.info("比較するには2日分以上のログデータが必要です。")
