@@ -768,21 +768,30 @@ if 'df_log' in locals() and not df_log.empty:
                         colors.append(r["growth_pct"])
                         hover_texts.append(f"{r['display_name']}<br>増減額: {r['diff_val']:+,.0f}円")
 
-            # 3. 描画（安定のため branchvalues は外す）
+            # 3. 描画（NaN%対策版）
             fig_growth = go.Figure(go.Treemap(
-                ids=ids, parents=parents, labels=labels, values=values,
+                ids=ids, 
+                parents=parents, 
+                labels=labels, 
+                values=values,
+                # markerのcolorsに渡しているリストを明示的に指定
                 marker=dict(
                     colors=colors, 
                     colorscale=["red", "lightgray", "green"], 
                     cmid=0, cmin=-10, cmax=10,
                     colorbar=dict(title="増減率 (%)")
                 ),
+                # %{color} が marker[colors] を参照するように設定
                 hovertemplate="<b>%{label}</b><br>現在資産: %{value:,.0f}円<br>期間増減率: %{color:.2f}%<br>%{customdata}<extra></extra>",
                 customdata=hover_texts,
+                # ここの %{color} を確実に数値として表示させる設定に変更
                 texttemplate="<b>%{label}</b><br>%{color:.2f}%",
             ))
             fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
-            st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_adjusted")
+            # 念のため、表示直前に NaN が混じっていないか最終チェック（もしNaNなら0にする）
+            fig_growth.update_traces(marker_colors=[0 if np.isnan(c) else c for c in colors])
+            
+            st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_no_nan")
         else:
             st.warning("表示できる比較データがありません。")
     else:
