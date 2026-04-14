@@ -709,52 +709,63 @@ if 'df_log' in locals() and not df_log.empty:
             d_merged[c] = d_merged[f"{c}_end"].replace([0, '', ' ', None], np.nan).fillna(d_merged[f"{c}_start"])
             d_merged[c] = d_merged[c].replace([0, '', ' ', None], '未分類').fillna('未分類')
 
-        # 2. グラフデータの構築（資産マップとロジックを統一）
+        # 2. グラフデータの構築（銘柄名で集計して重複を排除）
         df_p = d_merged[d_merged["value_jpy_end"] > 0].copy()
-        ids, parents, labels, values, colors, hover_texts = [], [], [], [], [], []
         
+        # ✅ 【追加】同じ表示名、同じアセットクラス、同じセクターの銘柄を合算
+        # これにより、別名義や別口座で持っている同じ銘柄が一つにまとまります
+        df_p_grouped = df_p.groupby(["asset_class", "sector", "display_name"], dropna=False).agg({
+            "value_jpy_start": "sum",
+            "value_jpy_end": "sum",
+            "diff_val": "sum"
+        }).reset_index()
+
+        # ✅ 【追加】集計後のデータで成長率を再計算
+        df_p_grouped["growth_pct"] = df_p_grouped.apply(
+            lambda r: 0 if r["value_jpy_start"] == 0 else (r["diff_val"] / r["value_jpy_start"]) * 100, 
+            axis=1
+        )
+
+        ids, parents, labels, values, colors, hover_texts = [], [], [], [], [], []
         root_id = "Growth_Root"
-        # ルートのラベルには期間を表示
         ids.append(root_id); parents.append(""); labels.append(f"期間: {s_date} → {e_date}"); values.append(0); colors.append(0); hover_texts.append("ポートフォリオ全体")
 
-        if not df_p.empty:
-            for ac in df_p["asset_class"].unique():
+        if not df_p_grouped.empty:
+            for ac in df_p_grouped["asset_class"].unique():
                 ac_id = f"ac_g|{ac}"
                 ids.append(ac_id); parents.append(root_id); labels.append(ac); values.append(0)
                 
-                # 色（騰落率）の計算
-                ac_growth = df_p[df_p["asset_class"] == ac]["growth_pct"].mean()
-                ac_growth = 0 if np.isnan(ac_growth) else ac_growth
+                # アセットクラス単位での騰落率（加重平均的な計算）
+                ac_data = df_p_grouped[df_p_grouped["asset_class"] == ac]
+                ac_start = ac_data["value_jpy_start"].sum()
+                ac_diff = ac_data["diff_val"].sum()
+                ac_growth = (ac_diff / ac_start * 100) if ac_start != 0 else 0
                 colors.append(ac_growth); hover_texts.append(f"{ac}")
                 
-                df_ac = df_p[df_p["asset_class"] == ac]
-
                 if ac in ["日本株", "現金・債券"]:
-                    # 【3階層】セクターあり
-                    for sector in df_ac["sector"].unique():
+                    for sector in ac_data["sector"].unique():
                         sect_id = f"sect_g|{ac}|{sector}"
                         ids.append(sect_id); parents.append(ac_id); labels.append(sector); values.append(0)
                         
-                        s_growth = df_ac[df_ac["sector"] == sector]["growth_pct"].mean()
-                        s_growth = 0 if np.isnan(s_growth) else s_growth
+                        s_data = ac_data[ac_data["sector"] == sector]
+                        s_start = s_data["value_jpy_start"].sum()
+                        s_diff = s_data["diff_val"].sum()
+                        s_growth = (s_diff / s_start * 100) if s_start != 0 else 0
                         colors.append(s_growth); hover_texts.append(f"{sector}")
                         
-                        df_s = df_ac[df_ac["sector"] == sector]
-                        for _, r in df_s.iterrows():
-                            item_id = f"item_g|{r['ticker']}|{sect_id}"
+                        for _, r in s_data.iterrows():
+                            # IDに ac と sector を含めることで完全ユニーク化
+                            item_id = f"item_g|{r['display_name']}|{sect_id}"
                             ids.append(item_id); parents.append(sect_id); labels.append(r["display_name"])
                             values.append(max(0, r["value_jpy_end"]))
-                            g_val = 0 if np.isnan(r["growth_pct"]) else r["growth_pct"]
-                            colors.append(g_val)
+                            colors.append(r["growth_pct"])
                             hover_texts.append(f"{r['display_name']}<br>増減額: {r['diff_val']:+,.0f}円")
                 else:
-                    # 【2階層】セクターなし
-                    for _, r in df_ac.iterrows():
-                        item_id = f"item_g|{r['ticker']}|{ac_id}"
+                    for _, r in ac_data.iterrows():
+                        item_id = f"item_g|{r['display_name']}|{ac_id}"
                         ids.append(item_id); parents.append(ac_id); labels.append(r["display_name"])
                         values.append(max(0, r["value_jpy_end"]))
-                        g_val = 0 if np.isnan(r["growth_pct"]) else r["growth_pct"]
-                        colors.append(g_val)
+                        colors.append(r["growth_pct"])
                         hover_texts.append(f"{r['display_name']}<br>増減額: {r['diff_val']:+,.0f}円")
 
             # 3. 描画（安定のため branchvalues は外す）
