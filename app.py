@@ -693,7 +693,7 @@ if 'df_log' in locals() and not df_log.empty:
     if len(date_list) >= 2:
         col_d1, col_d2 = st.columns(2)
         with col_d1:
-            s_date = st.selectbox("比較開始日", date_list, index=0, key="growth_s")
+            s_date = st.selectbox("比較開始日", date_list, index=len(date_list)-2, key="growth_s")
         with col_d2:
             e_date = st.selectbox("比較終了日", date_list, index=len(date_list)-1, key="growth_e")
 
