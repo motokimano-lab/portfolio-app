@@ -732,7 +732,7 @@ if 'df_log' in locals() and not df_log.empty:
         total_start = d_merged["value_jpy_start"].sum()
         total_growth = ((total_end - total_start) / total_start * 100) if total_start != 0 else 0
         
-        ids.append(root_id); parents.append(""); labels.append("ポートフォリオ")
+        ids.append(root_id); parents.append(""); labels.append(f" {total_jpy/1_000_000:.1f} M - 更新: {current_time}")
         values.append(0); colors.append(total_growth); hover_texts.append("全体合計")
 
         # アセットクラス単位
