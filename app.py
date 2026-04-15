@@ -776,7 +776,7 @@ if 'df_log' in locals() and not df_log.empty:
             ids=ids, parents=parents, labels=labels, values=values,
             marker=dict(
                 colors=colors, 
-                colorscale=["red", "lightgray", "green"], 
+                colorscale=finviz_colors, 
                 cmid=0, cmin=-5, cmax=5, # 振れ幅に合わせて調整
                 colorbar=dict(title="騰落率 (%)")
             ),
