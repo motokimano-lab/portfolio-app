@@ -733,7 +733,7 @@ if 'df_log' in locals() and not df_log.empty:
         total_growth = ((total_end - total_start) / total_start * 100) if total_start != 0 else 0
         
         ids.append(root_id); parents.append(""); labels.append("ポートフォリオ")
-        values.append(total_end); colors.append(total_growth); hover_texts.append("全体合計")
+        values.append(0); colors.append(total_growth); hover_texts.append("全体合計")
 
         # アセットクラス単位
         for ac in d_merged["asset_class"].unique():
@@ -744,7 +744,7 @@ if 'df_log' in locals() and not df_log.empty:
             ac_growth = ((ac_end - ac_start) / ac_start * 100) if ac_start != 0 else 0
             
             ids.append(ac_id); parents.append(root_id); labels.append(ac)
-            values.append(ac_end); colors.append(ac_growth); hover_texts.append(f"{ac} 合計")
+            values.append(0); colors.append(ac_growth); hover_texts.append(f"{ac} 合計")
 
             # 日本株と現金・債券はセクター階層を作る
             if ac in ["日本株", "現金・債券"]:
@@ -756,7 +756,7 @@ if 'df_log' in locals() and not df_log.empty:
                     s_growth = ((s_end - s_start) / s_start * 100) if s_start != 0 else 0
                     
                     ids.append(sect_id); parents.append(ac_id); labels.append(sector)
-                    values.append(s_end); colors.append(s_growth); hover_texts.append(f"{sector} 合計")
+                    values.append(0); colors.append(s_growth); hover_texts.append(f"{sector} 合計")
                     
                     for _, r in s_df.iterrows():
                         item_id = f"it|{r['display_name']}|{sect_id}"
