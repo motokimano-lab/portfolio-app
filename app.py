@@ -724,6 +724,7 @@ if 'df_log' in locals() and not df_log.empty:
         )
         d_merged["growth_pct"] = d_merged["growth_pct"].fillna(0)
         d_merged["growth_pct"] = d_merged["growth_pct"].round(2)
+
         
         # 2. グラフデータの構築
         ids, parents, labels, values, colors, hover_texts, custom_vals = [], [], [], [], [], [], []
@@ -739,7 +740,8 @@ if 'df_log' in locals() and not df_log.empty:
         total_pct = (total_diff / total_start * 100) if total_start != 0 else 0
 
         title_text = (
-        f"{total_end:,.0f}円     "
+        f"{total_end:,.0f}円   USDJPY:"
+        f"{usd_jpy:.2f}"
         f"{total_diff:+,.0f}円({total_pct:+.2f}%)   "
         f"{s_date.strftime('%Y/%m/%d')}  →  {e_date.strftime('%Y/%m/%d')}"
         )
@@ -779,7 +781,7 @@ if 'df_log' in locals() and not df_log.empty:
                         ids.append(item_id); parents.append(sect_id); labels.append(r["display_name"])
                         values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
                         hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
-                        custom_vals.append(r["growth_pct"])  # ←これ追加
+                        custom_vals.append(round(r["growth_pct"], 2))  # ←これ追加
             else:
                 # 米国株などは直接銘柄を表示
                 for _, r in ac_df.iterrows():
