@@ -722,12 +722,11 @@ if 'df_log' in locals() and not df_log.empty:
             lambda r: (r["diff_val"] / r["value_jpy_start"] * 100) if r["value_jpy_start"] != 0 else 0, 
             axis=1
         )
-        d_merged["growth_pct"] = d_merged["growth_pct"].fillna(0).round(2)
-
+        d_merged["growth_pct"] = d_merged["growth_pct"].fillna(0)
+        d_merged["growth_pct"] = d_merged["growth_pct"].round(2)
         
         # 2. グラフデータの構築
-        ids, parents, labels, values, colors, hover_texts = [], [], [], [], [], []
-
+        ids, parents, labels, values, colors, hover_texts, custom_vals = [], [], [], [], [], [], []
 
         
         # ルート（全体の合計）
@@ -789,14 +788,14 @@ if 'df_log' in locals() and not df_log.empty:
         fig_growth = go.Figure(go.Treemap(
             ids=ids, parents=parents, labels=labels, values=values,
             marker=dict(
-                colors=colors, 
+                colors=d_merged["growth_pct"], 
                 colorscale=finviz_colors, 
                 cmid=0, cmin=-5, cmax=5, # 振れ幅に合わせて調整
                 colorbar=dict(title="騰落率 (%)")
             ),
             hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>騰落率: %{customdata:+.2f}%<extra></extra>",
             customdata=colors,
-            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{customdata:+,.2f}%",
+            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{customdata:+.1f}%",
         ))
         fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
         st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_v2")
