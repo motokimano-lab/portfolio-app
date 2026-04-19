@@ -725,29 +725,26 @@ if 'df_log' in locals() and not df_log.empty:
         d_merged["growth_pct"] = d_merged["growth_pct"].fillna(0)
         d_merged["growth_pct"] = d_merged["growth_pct"].round(2)
 
-        
         # 2. グラフデータの構築
-        ids, parents, labels, values, colors, hover_texts, custom_vals = [], [], [], [], [], [], []
-
+        ids, parents, labels, values, colors, hover_texts = [], [], [], [], [], []
         
         # ルート（全体の合計）
         root_id = "Growth_Root"
         total_end = d_merged["value_jpy_end"].sum()
         total_start = d_merged["value_jpy_start"].sum()
         total_growth = ((total_end - total_start) / total_start * 100) if total_start != 0 else 0
-
         total_diff = total_end - total_start
-        total_pct = round((total_diff / total_start * 100), 2) if total_start != 0 else 0
 
+        # タイトル文字列（ここは今まで通り）
         title_text = (
-        f"{total_end:,.0f}円   "
-        f"{total_diff:+,.0f}円({total_pct:+.2f}%)   "
-        f"{s_date.strftime('%Y/%m/%d')}  →  {e_date.strftime('%Y/%m/%d')}"
+            f"{total_end:,.0f}円    "
+            f"{total_diff:+,.0f}円({total_growth:+.2f}%)    "
+            f"{s_date.strftime('%Y/%m/%d')}  →  {e_date.strftime('%Y/%m/%d')}"
         )
         
+        # ✅ valuesに0ではなく合計額(total_end)を入れることで親階層の「0円」を解消
         ids.append(root_id); parents.append(""); labels.append(title_text)
-        values.append(0); colors.append(round(total_growth, 2)); hover_texts.append("全体合計")
-        custom_vals.append(round(total_pct, 2))  # ←これ追加
+        values.append(total_end); colors.append(total_growth); hover_texts.append("ポートフォリオ全体")
 
         # アセットクラス単位
         for ac in d_merged["asset_class"].unique():
@@ -758,10 +755,8 @@ if 'df_log' in locals() and not df_log.empty:
             ac_growth = ((ac_end - ac_start) / ac_start * 100) if ac_start != 0 else 0
             
             ids.append(ac_id); parents.append(root_id); labels.append(ac)
-            values.append(0); colors.append(round(ac_growth, 2)); hover_texts.append(f"{ac} 合計")
-            custom_vals.append(round(ac_growth, 2))  # ←これ追加
+            values.append(ac_end); colors.append(ac_growth); hover_texts.append(f"{ac} 合計")
 
-            # 日本株と現金・債券はセクター階層を作る
             if ac in ["日本株", "現金・債券"]:
                 for sector in ac_df["sector"].unique():
                     sect_id = f"st|{ac}|{sector}"
@@ -770,42 +765,39 @@ if 'df_log' in locals() and not df_log.empty:
                     s_start = s_df["value_jpy_start"].sum()
                     s_growth = ((s_end - s_start) / s_start * 100) if s_start != 0 else 0
                     
-                                        
                     ids.append(sect_id); parents.append(ac_id); labels.append(sector)
-                    values.append(0); colors.append(round(s_growth, 2)); hover_texts.append(f"{sector} 合計")
-                    custom_vals.append(round(s_growth, 2)) # ←これ追加
+                    values.append(s_end); colors.append(s_growth); hover_texts.append(f"{sector} 合計")
                     
                     for _, r in s_df.iterrows():
                         item_id = f"it|{r['display_name']}|{sect_id}"
                         ids.append(item_id); parents.append(sect_id); labels.append(r["display_name"])
-                        values.append(r["value_jpy_end"]); colors.append(round(r["growth_pct"], 2))
+                        values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
                         hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
-                        custom_vals.append(round(r["growth_pct"], 2))  # ←こっち（数値のまま）  # ←これ追加
             else:
-                # 米国株などは直接銘柄を表示
                 for _, r in ac_df.iterrows():
                     item_id = f"it|{r['display_name']}|{ac_id}"
                     ids.append(item_id); parents.append(ac_id); labels.append(r["display_name"])
-                    values.append(r["value_jpy_end"]); colors.append(round(r["growth_pct"], 2))
+                    values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
                     hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
-                    custom_vals.append(round(r["growth_pct"], 2))  # ←こっち（数値のまま）  # ←これ追加
-                    
-        
+
         # 3. 描画
         fig_growth = go.Figure(go.Treemap(
-            ids=ids, parents=parents, labels=labels, values=values,
+            ids=ids, 
+            parents=parents, 
+            labels=labels, 
+            values=values,
+            # ✅ branchvalues="total" を指定することで、親のサイズを子の合計に一致させる
+            branchvalues="total",
             marker=dict(
                 colors=colors, 
                 colorscale=finviz_colors, 
-                cmid=0, cmin=-5, cmax=5, # 振れ幅に合わせて調整
+                cmid=0, cmin=-5, cmax=5,
                 colorbar=dict(title="騰落率 (%)")
             ),
-            hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>騰落率: %{customdata[0]:+.2f}%<extra></extra>",
-            customdata=[[v] for v in custom_vals],
-            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{customdata[0]:+.2f}%",
+            # ✅ %{color:+.2f}% を使うことで、確実に小数点2桁に固定します
+            hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>騰落率: %{color:+.2f}%<br>%{customdata}<extra></extra>",
+            customdata=hover_texts,
+            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{color:+.2f}%",
         ))
         fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
-        st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_v2")
-
-    else:
-        st.info("比較するには2日分以上のログデータが必要です。")
+        st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_v3")
