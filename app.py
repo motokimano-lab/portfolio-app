@@ -794,7 +794,7 @@ if 'df_log' in locals() and not df_log.empty:
                 cmid=0, cmin=-5, cmax=5, # 振れ幅に合わせて調整
                 colorbar=dict(title="騰落率 (%)")
             ),
-            hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>騰落率: %{customdata:+.2f}%<extra></extra>"",
+            hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>騰落率: %{customdata:+.2f}%<extra></extra>",
             customdata=colors,
             texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{customdata:+.1f}%",
         ))
