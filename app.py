@@ -673,6 +673,7 @@ def save_daily_log_detail(df):
 
 st.header("📊 期間比較（成長分析）")
 
+# df_logが存在し、空でないことを確認
 if 'df_log' in locals() and not df_log.empty:
     import plotly.graph_objects as go
     import numpy as np
@@ -681,84 +682,92 @@ if 'df_log' in locals() and not df_log.empty:
     df_comp = df_log.copy()
     df_comp["value_jpy"] = pd.to_numeric(df_comp["value_jpy"], errors='coerce').fillna(0)
     df_comp["date"] = pd.to_datetime(df_comp["date"]).dt.date
+    
     date_list = sorted(df_comp["date"].unique())
 
     if len(date_list) >= 2:
         col_d1, col_d2 = st.columns(2)
         with col_d1:
-            s_date = st.selectbox("比較開始日", date_list, index=len(date_list)-2, key="growth_s")
+            s_date = st.selectbox("比較開始日", date_list, index=len(date_list)-2, key="growth_s_final")
         with col_d2:
-            e_date = st.selectbox("比較終了日", date_list, index=len(date_list)-1, key="growth_e")
+            e_date = st.selectbox("比較終了日", date_list, index=len(date_list)-1, key="growth_e_final")
 
+        # --- A. データの集計 ---
         d_start = df_comp[df_comp["date"] == s_date].groupby(["asset_class", "sector", "display_name"], dropna=False)["value_jpy"].sum().reset_index()
         d_end = df_comp[df_comp["date"] == e_date].groupby(["asset_class", "sector", "display_name"], dropna=False)["value_jpy"].sum().reset_index()
 
         d_merged = pd.merge(d_end, d_start, on=["asset_class", "sector", "display_name"], how="outer", suffixes=("_end", "_start")).fillna(0)
         d_merged["diff_val"] = d_merged["value_jpy_end"] - d_merged["value_jpy_start"]
-        d_merged["growth_pct"] = d_merged.apply(lambda r: (r["diff_val"] / r["value_jpy_start"] * 100) if r["value_jpy_start"] != 0 else 0, axis=1)
-
+        
         # 2. グラフデータの構築
-        ids, parents, labels, values, colors, custom_vals = [], [], [], [], [], []
-        
+        ids, parents, labels, values, colors, custom_data = [], [], [], [], [], []
+
         # --- ルート（全体） ---
-        total_end = d_merged["value_jpy_end"].sum()
-        total_start = d_merged["value_jpy_start"].sum()
-        total_growth = ((total_end - total_start) / total_start * 100) if total_start != 0 else 0
+        t_end = d_merged["value_jpy_end"].sum()
+        t_start = d_merged["value_jpy_start"].sum()
+        t_growth = ((t_end - t_start) / t_start * 100) if t_start != 0 else 0
         
-        ids.append("root"); parents.append(""); labels.append("ポートフォリオ")
-        values.append(total_end); colors.append(total_growth)
-        # Python側で先に「表示用テキスト」を完璧に作ります
-        custom_vals.append([f"{total_end:,.0f}円", f"{total_growth:+.2f}%"])
+        ids.append("Total")
+        parents.append("")
+        labels.append("ポートフォリオ")
+        values.append(t_end)
+        colors.append(t_growth)
+        custom_data.append([f"{t_end:,.0f}円", f"{t_growth:+.2f}%"]) # ✅ ここで文字を作ってしまう
 
         # --- アセットクラス ---
         for ac in d_merged["asset_class"].unique():
             ac_df = d_merged[d_merged["asset_class"] == ac]
-            ac_end, ac_start = ac_df["value_jpy_end"].sum(), ac_df["value_jpy_start"].sum()
+            ac_end = ac_df["value_jpy_end"].sum()
+            ac_start = ac_df["value_jpy_start"].sum()
             ac_growth = ((ac_end - ac_start) / ac_start * 100) if ac_start != 0 else 0
             
-            ac_id = f"ac|{ac}"
-            ids.append(ac_id); parents.append("root"); labels.append(ac)
-            # ⬇️ ここに ac_end を入れることで「親の0円」が消えます
+            ac_id = f"ac_{ac}"
+            ids.append(ac_id); parents.append("Total"); labels.append(ac)
             values.append(ac_end); colors.append(ac_growth)
-            custom_vals.append([f"{ac_end:,.0f}円", f"{ac_growth:+.2f}%"])
-            
-            if ac in ["日本株", "現金・債券"]:
-                # --- セクター ---
-                for sector in ac_df["sector"].unique():
-                    sect_id = f"st|{ac}|{sector}"
-                    s_df = ac_df[ac_df["sector"] == sector]
-                    s_end, s_start = s_df["value_jpy_end"].sum(), s_df["value_jpy_start"].sum()
-                    s_growth = ((s_end - s_start) / s_start * 100) if s_start != 0 else 0
-                    
-                    ids.append(sect_id); parents.append(ac_id); labels.append(sector)
-                    values.append(s_end); colors.append(s_growth)
-                    custom_vals.append([f"{s_end:,.0f}円", f"{s_growth:+.2f}%"])
-                    
-                    # --- 個別銘柄 ---
-                    for _, r in s_df.iterrows():
-                        ids.append(f"it|{r['display_name']}|{sect_id}"); parents.append(sect_id); labels.append(r["display_name"])
-                        values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
-                        custom_vals.append([f"{r['value_jpy_end']:,.0f}円", f"{r['growth_pct']:+.2f}%"])
-            else:
-                for _, r in ac_df.iterrows():
-                    ids.append(f"it|{r['display_name']}|{ac_id}"); parents.append(ac_id); labels.append(r["display_name"])
-                    values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
-                    custom_vals.append([f"{r['value_jpy_end']:,.0f}円", f"{r['growth_pct']:+.2f}%"])
+            custom_data.append([f"{ac_end:,.0f}円", f"{ac_growth:+.2f}%"])
+
+            # --- セクター ---
+            for sector in ac_df["sector"].unique():
+                s_df = ac_df[ac_df["sector"] == sector]
+                s_end = s_df["value_jpy_end"].sum()
+                s_start = s_df["value_jpy_start"].sum()
+                s_growth = ((s_end - s_start) / s_start * 100) if s_start != 0 else 0
+                
+                s_id = f"sect_{ac}_{sector}"
+                ids.append(s_id); parents.append(ac_id); labels.append(sector)
+                values.append(s_end); colors.append(s_growth)
+                custom_data.append([f"{s_end:,.0f}円", f"{s_growth:+.2f}%"])
+
+                # --- 個別銘柄 ---
+                for _, r in s_df.iterrows():
+                    ids.append(f"item_{r['display_name']}_{s_id}")
+                    parents.append(s_id)
+                    labels.append(r["display_name"])
+                    values.append(r["value_jpy_end"])
+                    colors.append(r["growth_pct"])
+                    custom_data.append([f"{r['value_jpy_end']:,.0f}円", f"{r['growth_pct']:+.2f}%"])
 
         # 3. 描画
-        fig_growth = go.Figure(go.Treemap(
-            ids=ids, parents=parents, labels=labels, values=values,
+        fig = go.Figure(go.Treemap(
+            ids=ids,
+            parents=parents,
+            labels=labels,
+            values=values,
             branchvalues="total",
-            customdata=custom_vals,
-            marker=dict(colors=colors, colorscale="RdYlGn", cmid=0, cmin=-5, cmax=5),
-            # ✅ %{color} ではなく、作成済みの %{customdata[1]} を表示
-            hovertemplate="<b>%{label}</b><br>資産額: %{customdata[0]}<br>騰落率: %{customdata[1]}<extra></extra>",
-            # ✅ ラベルも同様に customdata を参照
-            texttemplate="<b>%{label}</b><br>%{customdata[0]}<br>%{customdata[1]}"
+            customdata=custom_data,
+            marker=dict(
+                colors=colors,
+                colorscale="RdYlGn",
+                cmid=0,
+                colorbar=dict(title="騰落率 (%)")
+            ),
+            # ✅ 魔法の指定：計算済みのcustomdataだけを表示に使う
+            texttemplate="<b>%{label}</b><br>%{customdata[0]}<br>%{customdata[1]}",
+            hovertemplate="<b>%{label}</b><br>資産額: %{customdata[0]}<br>騰落率: %{customdata[1]}<extra></extra>"
         ))
-        fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
-        # 💡 keyを更新してStreamlitのキャッシュを強制クリアします
-        st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_v5_final")
+
+        fig.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
+        st.plotly_chart(fig, use_container_width=True, key="growth_tree_ultra_final")
 
     else:
-        st.info("比較するには2日分以上のログデータが必要です。")
+        st.info("比較するには2つ以上のログデータが必要です。")
