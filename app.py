@@ -677,14 +677,12 @@ if st.button("📅 今日の資産を記録"):
 
 st.header("📊 期間比較（成長分析）")
 
-# df_logが存在し、空でないことを確認
 if 'df_log' in locals() and not df_log.empty:
     import plotly.graph_objects as go
     import numpy as np
 
-    # 1. データの準備
+    # 1. データの準備（集計とマージ）
     df_comp = df_log.copy()
-    # 数値変換と日付変換
     df_comp["value_jpy"] = pd.to_numeric(df_comp["value_jpy"], errors='coerce').fillna(0)
     df_comp["date"] = pd.to_datetime(df_comp["date"]).dt.date
     
@@ -697,66 +695,41 @@ if 'df_log' in locals() and not df_log.empty:
         with col_d2:
             e_date = st.selectbox("比較終了日", date_list, index=len(date_list)-1, key="growth_e")
 
-        # --- A. 期間データの抽出 ---
-        d_start_raw = df_comp[df_comp["date"] == s_date].copy()
-        d_end_raw = df_comp[df_comp["date"] == e_date].copy()
+        d_start = df_comp[df_comp["date"] == s_date].groupby(["asset_class", "sector", "display_name"], dropna=False)["value_jpy"].sum().reset_index()
+        d_end = df_comp[df_comp["date"] == e_date].groupby(["asset_class", "sector", "display_name"], dropna=False)["value_jpy"].sum().reset_index()
 
-        # --- B. 銘柄単位で集計（名義や口座の重複を合算して「10倍問題」を解決） ---
-        def summarize_assets(df_target):
-            # あなたのアプリの実際の列名 [value_jpy] を使用
-            return df_target.groupby(["asset_class", "sector", "display_name"], dropna=False)["value_jpy"].sum().reset_index()
-
-        d_start = summarize_assets(d_start_raw)
-        d_end = summarize_assets(d_end_raw)
-
-        # --- C. データのマージ ---
-        d_merged = pd.merge(
-            d_end, d_start, 
-            on=["asset_class", "sector", "display_name"], 
-            how="outer", suffixes=("_end", "_start")
-        ).fillna(0)
-
-        # 騰落率の計算
+        d_merged = pd.merge(d_end, d_start, on=["asset_class", "sector", "display_name"], how="outer", suffixes=("_end", "_start")).fillna(0)
         d_merged["diff_val"] = d_merged["value_jpy_end"] - d_merged["value_jpy_start"]
-        d_merged["growth_pct"] = d_merged.apply(
-            lambda r: (r["diff_val"] / r["value_jpy_start"] * 100) if r["value_jpy_start"] != 0 else 0, 
-            axis=1
-        )
-        d_merged["growth_pct"] = d_merged["growth_pct"].fillna(0)
-        d_merged["growth_pct"] = d_merged["growth_pct"].round(2)
+        d_merged["growth_pct"] = d_merged.apply(lambda r: (r["diff_val"] / r["value_jpy_start"] * 100) if r["value_jpy_start"] != 0 else 0, axis=1)
 
-       
-        
-# 2. グラフデータの構築（表示文字列をPython側で作ってしまう）
         # 2. グラフデータの構築
         ids, parents, labels, values, colors, hover_texts, custom_vals = [], [], [], [], [], [], []
         
-        # ルート（全体の合計）
-        root_id = "Growth_Root"
+        # --- ルート ---
         total_end = d_merged["value_jpy_end"].sum()
         total_start = d_merged["value_jpy_start"].sum()
         total_growth = ((total_end - total_start) / total_start * 100) if total_start != 0 else 0
         
-        # ✅ 修正1: values.append(0) ではなく、算出した合計額(total_end)を入れる
-        ids.append(root_id); parents.append(""); labels.append("ポートフォリオ")
+        ids.append("root"); parents.append(""); labels.append("ポートフォリオ")
+        # ✅ 重要：ここが0だと親階層が0円になります
         values.append(total_end); colors.append(total_growth)
-        # ✅ 修正2: Python側で先に「文字」を作ってしまう（これが小数の桁数を固定する最強の方法です）
         custom_vals.append([f"{total_end:,.0f}円", f"{total_growth:+.2f}%"])
 
-        # アセットクラス単位
+        # --- アセットクラス ---
         for ac in d_merged["asset_class"].unique():
             ac_df = d_merged[d_merged["asset_class"] == ac]
-            ac_id = f"ac|{ac}"
             ac_end = ac_df["value_jpy_end"].sum()
             ac_start = ac_df["value_jpy_start"].sum()
             ac_growth = ((ac_end - ac_start) / ac_start * 100) if ac_start != 0 else 0
             
-            ids.append(ac_id); parents.append(root_id); labels.append(ac)
-            # ✅ 修正3: ここも ac_end を入れる
+            ac_id = f"ac|{ac}"
+            ids.append(ac_id); parents.append("root"); labels.append(ac)
+            # ✅ 重要：親のサイズ（金額）を正しく入れる
             values.append(ac_end); colors.append(ac_growth)
             custom_vals.append([f"{ac_end:,.0f}円", f"{ac_growth:+.2f}%"])
             
             if ac in ["日本株", "現金・債券"]:
+                # --- セクター ---
                 for sector in ac_df["sector"].unique():
                     sect_id = f"st|{ac}|{sector}"
                     s_df = ac_df[ac_df["sector"] == sector]
@@ -765,10 +738,11 @@ if 'df_log' in locals() and not df_log.empty:
                     s_growth = ((s_end - s_start) / s_start * 100) if s_start != 0 else 0
                     
                     ids.append(sect_id); parents.append(ac_id); labels.append(sector)
-                    # ✅ 修正4: ここも s_end を入れる
+                    # ✅ 重要：ここもs_endを入れる
                     values.append(s_end); colors.append(s_growth)
                     custom_vals.append([f"{s_end:,.0f}円", f"{s_growth:+.2f}%"])
                     
+                    # --- 個別銘柄 ---
                     for _, r in s_df.iterrows():
                         item_id = f"it|{r['display_name']}|{sect_id}"
                         ids.append(item_id); parents.append(sect_id); labels.append(r["display_name"])
@@ -788,20 +762,24 @@ if 'df_log' in locals() and not df_log.empty:
             labels=labels, 
             values=values,
             branchvalues="total",
+            customdata=custom_vals,
             marker=dict(
                 colors=colors, 
-                colorscale=finviz_colors, 
+                colorscale="RdYlGn", # Finviz風カラー
                 cmid=0, cmin=-5, cmax=5,
                 colorbar=dict(title="騰落率 (%)")
             ),
-            # ✅ %{customdata[index]} をそのまま表示するだけにする（すでにPython側で整形済みのため）
+            # ✅ ここが重要：% {color} ではなく、Pythonで整形した %{customdata[1]} を使う
             hovertemplate="""
             <b>%{label}</b>
             <br>資産額: %{customdata[0]}
             <br>騰落率: %{customdata[1]}
             <extra></extra>""",
-            customdata = custom_vals,
+            # ✅ ラベル表示も整形済みの customdata を使うことで長い小数を物理的に排除
             texttemplate="<b>%{label}</b><br>%{customdata[0]}<br>%{customdata[1]}"          
         ))
         fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
-        st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_v4")
+        st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_perfect")
+
+    else:
+        st.info("比較するには2日分以上のログデータが必要です。")
