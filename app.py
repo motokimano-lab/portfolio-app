@@ -725,6 +725,15 @@ if 'df_log' in locals() and not df_log.empty:
 
         # 2. グラフデータの構築
         ids, parents, labels, values, colors, hover_texts = [], [], [], [], [], []
+
+        total_diff = total_end - total_start
+        total_pct = (total_diff / total_start * 100) if total_start != 0 else 0
+
+        title_text = (
+        f"{total_end:,.0f}円 "
+        f"{total_diff:+,.0f}円({total_pct:+.1f}%) "
+        f"{s_date.strftime('%Y/%m/%d')}→{e_date.strftime('%Y/%m/%d')}"
+        )
         
         # ルート（全体の合計）
         root_id = "Growth_Root"
@@ -732,7 +741,7 @@ if 'df_log' in locals() and not df_log.empty:
         total_start = d_merged["value_jpy_start"].sum()
         total_growth = ((total_end - total_start) / total_start * 100) if total_start != 0 else 0
         
-        ids.append(root_id); parents.append(""); labels.append(f" {total_jpy/1_000_000:.1f} M - 更新: {current_time}")
+        ids.append(root_id); parents.append(""); labels.append(title_text)
         values.append(0); colors.append(total_growth); hover_texts.append("全体合計")
 
         # アセットクラス単位
@@ -754,6 +763,8 @@ if 'df_log' in locals() and not df_log.empty:
                     s_end = s_df["value_jpy_end"].sum()
                     s_start = s_df["value_jpy_start"].sum()
                     s_growth = ((s_end - s_start) / s_start * 100) if s_start != 0 else 0
+                    d_merged["growth_pct"] = d_merged["growth_pct"].fillna(0)
+                    lambda r: (r["diff_val"] / r["value_jpy_start"] * 100) if r["value_jpy_start"] != 0 else 0
                     
                     ids.append(sect_id); parents.append(ac_id); labels.append(sector)
                     values.append(0); colors.append(s_growth); hover_texts.append(f"{sector} 合計")
@@ -782,7 +793,7 @@ if 'df_log' in locals() and not df_log.empty:
             ),
             hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>騰落率: %{color:.2f}%<br>%{customdata}<extra></extra>",
             customdata=hover_texts,
-            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{color:.2f}%",
+            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{color:+.1f}%",
         ))
         fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
         st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_v2")
