@@ -671,6 +671,7 @@ def save_daily_log_detail(df):
 
     return f"{len(rows)} rows saved!"
 
+st.write("DEBUG: コードが読み込まれています！") # これを追加
 st.header("📊 期間比較（成長分析）")
 
 # df_logが存在し、空でないことを確認
