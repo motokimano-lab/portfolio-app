@@ -781,7 +781,7 @@ if 'df_log' in locals() and not df_log.empty:
                         ids.append(item_id); parents.append(sect_id); labels.append(r["display_name"])
                         values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
                         hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
-                        custom_vals.append(r["growth_pct"])  # ←こっち（数値のまま）  # ←これ追加
+                        custom_vals.append(float(f"{r['growth_pct']:.2f}"))  # ←こっち（数値のまま）  # ←これ追加
             else:
                 # 米国株などは直接銘柄を表示
                 for _, r in ac_df.iterrows():
@@ -789,8 +789,9 @@ if 'df_log' in locals() and not df_log.empty:
                     ids.append(item_id); parents.append(ac_id); labels.append(r["display_name"])
                     values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
                     hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
-                    custom_vals.append(r["growth_pct"])  # ←こっち（数値のまま）  # ←これ追加
-
+                    custom_vals.append(float(f"{r['growth_pct']:.2f}"))  # ←こっち（数値のまま）  # ←これ追加
+                    custom_vals = [round(x, 2) for x in custom_vals]
+        
         # 3. 描画
         fig_growth = go.Figure(go.Treemap(
             ids=ids, parents=parents, labels=labels, values=values,
