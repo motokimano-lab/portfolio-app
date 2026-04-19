@@ -1,5 +1,6 @@
 import pandas as pd
 import streamlit as st
+st.error("これは絶対に表示されるはずのメッセージです！")
 import yfinance as yf
 import plotly.express as px
 from datetime import datetime
