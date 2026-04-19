@@ -738,9 +738,9 @@ if 'df_log' in locals() and not df_log.empty:
         total_pct = (total_diff / total_start * 100) if total_start != 0 else 0
 
         title_text = (
-        f"{total_end:,.0f}円 "
-        f"{total_diff:+,.0f}円({total_pct:+.1f}%) "
-        f"{s_date.strftime('%Y/%m/%d')}→{e_date.strftime('%Y/%m/%d')}"
+        f"{total_end:,.0f}円     "
+        f"{total_diff:+,.0f}円({total_pct:+.2f}%)   "
+        f"{s_date.strftime('%Y/%m/%d')}  →  {e_date.strftime('%Y/%m/%d')}"
         )
         
         ids.append(root_id); parents.append(""); labels.append(title_text)
