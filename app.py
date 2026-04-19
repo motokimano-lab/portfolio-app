@@ -719,7 +719,7 @@ if 'df_log' in locals() and not df_log.empty:
         
         ids.append("Total")
         parents.append("")
-        labels.append("ポートフォリオ")
+        labels.append("( f"{total_end:,.0f}円 " f"{total_diff:+,.0f}円({total_growth:+.2f}%) " f"{s_date.strftime('%Y/%m/%d')} → {e_date.strftime('%Y/%m/%d')}" )")
         values.append(t_end)
         colors.append(t_growth)
         custom_data.append([f"{t_end:,.0f}円", f"{t_growth:+.2f}%"])
