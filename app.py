@@ -722,7 +722,9 @@ if 'df_log' in locals() and not df_log.empty:
             lambda r: (r["diff_val"] / r["value_jpy_start"] * 100) if r["value_jpy_start"] != 0 else 0, 
             axis=1
         )
+        d_merged["growth_pct"] = d_merged["growth_pct"].fillna(0)
 
+        
         # 2. グラフデータの構築
         ids, parents, labels, values, colors, hover_texts = [], [], [], [], [], []
 
@@ -765,9 +767,8 @@ if 'df_log' in locals() and not df_log.empty:
                     s_end = s_df["value_jpy_end"].sum()
                     s_start = s_df["value_jpy_start"].sum()
                     s_growth = ((s_end - s_start) / s_start * 100) if s_start != 0 else 0
-                    d_merged["growth_pct"] = d_merged["growth_pct"].fillna(0)
-                    lambda r: (r["diff_val"] / r["value_jpy_start"] * 100) if r["value_jpy_start"] != 0 else 0
                     
+                                        
                     ids.append(sect_id); parents.append(ac_id); labels.append(sector)
                     values.append(0); colors.append(s_growth); hover_texts.append(f"{sector} 合計")
                     
