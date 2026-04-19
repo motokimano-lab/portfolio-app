@@ -740,7 +740,7 @@ if 'df_log' in locals() and not df_log.empty:
         total_pct = (total_diff / total_start * 100) if total_start != 0 else 0
 
         title_text = (
-        f"{total_end:,.0f}円   USDJPY:"
+        f"{total_end:,.0f}円   USDJPY"
         f"{usd_jpy:.2f}"
         f"{total_diff:+,.0f}円({total_pct:+.2f}%)   "
         f"{s_date.strftime('%Y/%m/%d')}  →  {e_date.strftime('%Y/%m/%d')}"
@@ -789,7 +789,7 @@ if 'df_log' in locals() and not df_log.empty:
                     ids.append(item_id); parents.append(ac_id); labels.append(r["display_name"])
                     values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
                     hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
-                    custom_vals.append(r["growth_pct"])  # ←これ追加
+                    custom_vals.append(round(r["growth_pct"], 2))  # ←これ追加
 
         # 3. 描画
         fig_growth = go.Figure(go.Treemap(
