@@ -744,7 +744,7 @@ if 'df_log' in locals() and not df_log.empty:
         
         # ✅ valuesに0ではなく合計額(total_end)を入れることで親階層の「0円」を解消
         ids.append(root_id); parents.append(""); labels.append(title_text)
-        values.append(total_end); colors.append(total_growth); hover_texts.append("ポートフォリオ全体")
+        values.append(total_end); colors.append(round(total_growth, 2)); hover_texts.append("ポートフォリオ全体")
 
         # アセットクラス単位
         for ac in d_merged["asset_class"].unique():
@@ -755,7 +755,7 @@ if 'df_log' in locals() and not df_log.empty:
             ac_growth = ((ac_end - ac_start) / ac_start * 100) if ac_start != 0 else 0
             
             ids.append(ac_id); parents.append(root_id); labels.append(ac)
-            values.append(ac_end); colors.append(ac_growth); hover_texts.append(f"{ac} 合計")
+            values.append(ac_end); colors.append(round(ac_growth, 2)); hover_texts.append(f"{ac} 合計")
 
             if ac in ["日本株", "現金・債券"]:
                 for sector in ac_df["sector"].unique():
@@ -766,18 +766,18 @@ if 'df_log' in locals() and not df_log.empty:
                     s_growth = ((s_end - s_start) / s_start * 100) if s_start != 0 else 0
                     
                     ids.append(sect_id); parents.append(ac_id); labels.append(sector)
-                    values.append(s_end); colors.append(s_growth); hover_texts.append(f"{sector} 合計")
+                    values.append(s_end); colors.append(round(s_growth, 2)); hover_texts.append(f"{sector} 合計")
                     
                     for _, r in s_df.iterrows():
                         item_id = f"it|{r['display_name']}|{sect_id}"
                         ids.append(item_id); parents.append(sect_id); labels.append(r["display_name"])
-                        values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
+                        values.append(r["value_jpy_end"]); colors.append(round(r["growth_pct"], 2))
                         hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
             else:
                 for _, r in ac_df.iterrows():
                     item_id = f"it|{r['display_name']}|{ac_id}"
                     ids.append(item_id); parents.append(ac_id); labels.append(r["display_name"])
-                    values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
+                    values.append(r["value_jpy_end"]); colors.append(round(r["growth_pct"], 2))
                     hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
 
         # 3. 描画
