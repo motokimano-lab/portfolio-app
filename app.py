@@ -726,6 +726,14 @@ if 'df_log' in locals() and not df_log.empty:
         # 2. グラフデータの構築
         ids, parents, labels, values, colors, hover_texts = [], [], [], [], [], []
 
+
+        
+        # ルート（全体の合計）
+        root_id = "Growth_Root"
+        total_end = d_merged["value_jpy_end"].sum()
+        total_start = d_merged["value_jpy_start"].sum()
+        total_growth = ((total_end - total_start) / total_start * 100) if total_start != 0 else 0
+
         total_diff = total_end - total_start
         total_pct = (total_diff / total_start * 100) if total_start != 0 else 0
 
@@ -734,12 +742,6 @@ if 'df_log' in locals() and not df_log.empty:
         f"{total_diff:+,.0f}円({total_pct:+.1f}%) "
         f"{s_date.strftime('%Y/%m/%d')}→{e_date.strftime('%Y/%m/%d')}"
         )
-        
-        # ルート（全体の合計）
-        root_id = "Growth_Root"
-        total_end = d_merged["value_jpy_end"].sum()
-        total_start = d_merged["value_jpy_start"].sum()
-        total_growth = ((total_end - total_start) / total_start * 100) if total_start != 0 else 0
         
         ids.append(root_id); parents.append(""); labels.append(title_text)
         values.append(0); colors.append(total_growth); hover_texts.append("全体合計")
