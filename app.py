@@ -767,7 +767,7 @@ if 'df_log' in locals() and not df_log.empty:
             customdata=custom_data,
             marker=dict(
                 colors=colors,
-                colorscale="RdYlGn",
+                colorscale=finviz_colors, 
                 cmid=0,
                 colorbar=dict(title="騰落率 (%)")
             ),
