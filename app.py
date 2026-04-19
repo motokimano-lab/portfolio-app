@@ -748,7 +748,7 @@ if 'df_log' in locals() and not df_log.empty:
         
         ids.append(root_id); parents.append(""); labels.append(title_text)
         values.append(0); colors.append(total_growth); hover_texts.append("全体合計")
-        custom_vals.append(total_pct)  # ←これ追加
+        custom_vals.append(round(total_pct, 2))  # ←これ追加
 
         # アセットクラス単位
         for ac in d_merged["asset_class"].unique():
@@ -759,8 +759,8 @@ if 'df_log' in locals() and not df_log.empty:
             ac_growth = ((ac_end - ac_start) / ac_start * 100) if ac_start != 0 else 0
             
             ids.append(ac_id); parents.append(root_id); labels.append(ac)
-            values.append(0); colors.append(ac_growth); hover_texts.append(f"{ac} 合計")
-            custom_vals.append(ac_growth)  # ←これ追加
+            values.append(0); colors.append(round(ac_growth, 2)); hover_texts.append(f"{ac} 合計")
+            custom_vals.append(round(ac_growth, 2))  # ←これ追加
 
             # 日本株と現金・債券はセクター階層を作る
             if ac in ["日本株", "現金・債券"]:
@@ -774,14 +774,14 @@ if 'df_log' in locals() and not df_log.empty:
                                         
                     ids.append(sect_id); parents.append(ac_id); labels.append(sector)
                     values.append(0); colors.append(s_growth); hover_texts.append(f"{sector} 合計")
-                    custom_vals.append(s_growth)  # ←これ追加
+                    custom_vals.append(round(s_growth, 2)) # ←これ追加
                     
                     for _, r in s_df.iterrows():
                         item_id = f"it|{r['display_name']}|{sect_id}"
                         ids.append(item_id); parents.append(sect_id); labels.append(r["display_name"])
                         values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
                         hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
-                        custom_vals.append(float(f"{r['growth_pct']:.2f}"))  # ←こっち（数値のまま）  # ←これ追加
+                        custom_vals.append(round(r["growth_pct"], 2))  # ←こっち（数値のまま）  # ←これ追加
             else:
                 # 米国株などは直接銘柄を表示
                 for _, r in ac_df.iterrows():
@@ -789,8 +789,8 @@ if 'df_log' in locals() and not df_log.empty:
                     ids.append(item_id); parents.append(ac_id); labels.append(r["display_name"])
                     values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
                     hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
-                    custom_vals.append(float(f"{r['growth_pct']:.2f}"))  # ←こっち（数値のまま）  # ←これ追加
-                    custom_vals = [round(x, 2) for x in custom_vals]
+                    custom_vals.append(round(r["growth_pct"], 2))  # ←こっち（数値のまま）  # ←これ追加
+                    
         
         # 3. 描画
         fig_growth = go.Figure(go.Treemap(
