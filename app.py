@@ -744,8 +744,8 @@ if 'df_log' in locals() and not df_log.empty:
         
         # ✅ valuesに0ではなく合計額(total_end)を入れることで親階層の「0円」を解消
         ids.append(root_id); parents.append(""); labels.append(title_text)
-        values.append(total_end); colors.append(round(total_growth, 2)); hover_texts.append("ポートフォリオ全体")
-        custom_vals.append(round(r["total_growth"], 2))
+        values.append(0); colors.append(round(total_growth, 2)); hover_texts.append("ポートフォリオ全体")
+        custom_vals.append(round(total_growth, 2))
 
         # アセットクラス単位
         for ac in d_merged["asset_class"].unique():
@@ -757,7 +757,7 @@ if 'df_log' in locals() and not df_log.empty:
             
             ids.append(ac_id); parents.append(root_id); labels.append(ac)
             values.append(0); colors.append(round(ac_growth, 2)); hover_texts.append(f"{ac} 合計")
-            custom_vals.append(round(r["ac_growth"], 2))
+            custom_vals.append(round(ac_growth, 2))
 
             if ac in ["日本株", "現金・債券"]:
                 for sector in ac_df["sector"].unique():
@@ -769,7 +769,7 @@ if 'df_log' in locals() and not df_log.empty:
                     
                     ids.append(sect_id); parents.append(ac_id); labels.append(sector)
                     values.append(0); colors.append(round(s_growth, 2)); hover_texts.append(f"{sector} 合計")
-                    custom_vals.append(round(r["s_growth"], 2))
+                    custom_vals.append(round(s_growth, 2))
                     
                     for _, r in s_df.iterrows():
                         item_id = f"it|{r['display_name']}|{sect_id}"
@@ -792,7 +792,7 @@ if 'df_log' in locals() and not df_log.empty:
             labels=labels, 
             values=values,
             # ✅ branchvalues="total" を指定することで、親のサイズを子の合計に一致させる
-            branchvalues="remainder",
+            branchvalues="total",
             marker=dict(
                 colors=colors, 
                 colorscale=finviz_colors, 
@@ -805,9 +805,8 @@ if 'df_log' in locals() and not df_log.empty:
             <br>資産額: %{value:,.0f}円
             <br>騰落率: %{customdata:+.2f}%
             <extra></extra>""",
-            customdata=hover_texts, #これは必要なのか？
-            customdata=custom_vals,
-            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{customdata:+.2f}%"            
+            customdata = np.array(custom_vals).reshape(-1, 1),
+            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{customdata[0]:+.2f}%"          
         ))
         fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
         st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_v3")
