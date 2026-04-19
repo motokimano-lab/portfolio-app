@@ -737,17 +737,16 @@ if 'df_log' in locals() and not df_log.empty:
         total_growth = ((total_end - total_start) / total_start * 100) if total_start != 0 else 0
 
         total_diff = total_end - total_start
-        total_pct = (total_diff / total_start * 100) if total_start != 0 else 0
+        total_pct = round((total_diff / total_start * 100), 2) if total_start != 0 else 0
 
         title_text = (
-        f"{total_end:,.0f}円   USDJPY"
-        f"{usd_jpy:.2f}"
+        f"{total_end:,.0f}円   "
         f"{total_diff:+,.0f}円({total_pct:+.2f}%)   "
         f"{s_date.strftime('%Y/%m/%d')}  →  {e_date.strftime('%Y/%m/%d')}"
         )
         
         ids.append(root_id); parents.append(""); labels.append(title_text)
-        values.append(0); colors.append(total_growth); hover_texts.append("全体合計")
+        values.append(0); colors.append(round(total_growth, 2)); hover_texts.append("全体合計")
         custom_vals.append(round(total_pct, 2))  # ←これ追加
 
         # アセットクラス単位
@@ -773,13 +772,13 @@ if 'df_log' in locals() and not df_log.empty:
                     
                                         
                     ids.append(sect_id); parents.append(ac_id); labels.append(sector)
-                    values.append(0); colors.append(s_growth); hover_texts.append(f"{sector} 合計")
+                    values.append(0); colors.append(round(s_growth, 2)); hover_texts.append(f"{sector} 合計")
                     custom_vals.append(round(s_growth, 2)) # ←これ追加
                     
                     for _, r in s_df.iterrows():
                         item_id = f"it|{r['display_name']}|{sect_id}"
                         ids.append(item_id); parents.append(sect_id); labels.append(r["display_name"])
-                        values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
+                        values.append(r["value_jpy_end"]); colors.append(round(r["growth_pct"], 2))
                         hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
                         custom_vals.append(round(r["growth_pct"], 2))  # ←こっち（数値のまま）  # ←これ追加
             else:
@@ -787,7 +786,7 @@ if 'df_log' in locals() and not df_log.empty:
                 for _, r in ac_df.iterrows():
                     item_id = f"it|{r['display_name']}|{ac_id}"
                     ids.append(item_id); parents.append(ac_id); labels.append(r["display_name"])
-                    values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
+                    values.append(r["value_jpy_end"]); colors.append(round(r["growth_pct"], 2))
                     hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
                     custom_vals.append(round(r["growth_pct"], 2))  # ←こっち（数値のまま）  # ←これ追加
                     
@@ -803,7 +802,7 @@ if 'df_log' in locals() and not df_log.empty:
             ),
             hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>騰落率: %{customdata:+.2f}%<extra></extra>",
             customdata=custom_vals,
-            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{customdata:+.2f}%",
+            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br><span style='color:white'>%{customdata:+.2f}%</span>",
         ))
         fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
         st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_v2")
