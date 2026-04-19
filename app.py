@@ -726,7 +726,7 @@ if 'df_log' in locals() and not df_log.empty:
         d_merged["growth_pct"] = d_merged["growth_pct"].round(2)
 
         # 2. グラフデータの構築
-        ids, parents, labels, values, colors, hover_texts = [], [], [], [], [], []
+        ids, parents, labels, values, colors, hover_texts, custom_vals = [], [], [], [], [], [], []
         
         # ルート（全体の合計）
         root_id = "Growth_Root"
@@ -745,6 +745,7 @@ if 'df_log' in locals() and not df_log.empty:
         # ✅ valuesに0ではなく合計額(total_end)を入れることで親階層の「0円」を解消
         ids.append(root_id); parents.append(""); labels.append(title_text)
         values.append(total_end); colors.append(round(total_growth, 2)); hover_texts.append("ポートフォリオ全体")
+        custom_vals.append(round(r["total_growth"], 2))
 
         # アセットクラス単位
         for ac in d_merged["asset_class"].unique():
@@ -755,7 +756,8 @@ if 'df_log' in locals() and not df_log.empty:
             ac_growth = ((ac_end - ac_start) / ac_start * 100) if ac_start != 0 else 0
             
             ids.append(ac_id); parents.append(root_id); labels.append(ac)
-            values.append(ac_end); colors.append(round(ac_growth, 2)); hover_texts.append(f"{ac} 合計")
+            values.append(0); colors.append(round(ac_growth, 2)); hover_texts.append(f"{ac} 合計")
+            custom_vals.append(round(r["ac_growth"], 2))
 
             if ac in ["日本株", "現金・債券"]:
                 for sector in ac_df["sector"].unique():
@@ -766,19 +768,22 @@ if 'df_log' in locals() and not df_log.empty:
                     s_growth = ((s_end - s_start) / s_start * 100) if s_start != 0 else 0
                     
                     ids.append(sect_id); parents.append(ac_id); labels.append(sector)
-                    values.append(s_end); colors.append(round(s_growth, 2)); hover_texts.append(f"{sector} 合計")
+                    values.append(0); colors.append(round(s_growth, 2)); hover_texts.append(f"{sector} 合計")
+                    custom_vals.append(round(r["s_growth"], 2))
                     
                     for _, r in s_df.iterrows():
                         item_id = f"it|{r['display_name']}|{sect_id}"
                         ids.append(item_id); parents.append(sect_id); labels.append(r["display_name"])
                         values.append(r["value_jpy_end"]); colors.append(round(r["growth_pct"], 2))
                         hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
+                        custom_vals.append(round(r["growth_pct"], 2))
             else:
                 for _, r in ac_df.iterrows():
                     item_id = f"it|{r['display_name']}|{ac_id}"
                     ids.append(item_id); parents.append(ac_id); labels.append(r["display_name"])
                     values.append(r["value_jpy_end"]); colors.append(round(r["growth_pct"], 2))
                     hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
+                    custom_vals.append(round(r["growth_pct"], 2))
 
         # 3. 描画
         fig_growth = go.Figure(go.Treemap(
@@ -787,7 +792,7 @@ if 'df_log' in locals() and not df_log.empty:
             labels=labels, 
             values=values,
             # ✅ branchvalues="total" を指定することで、親のサイズを子の合計に一致させる
-            branchvalues="total",
+            branchvalues="remainder",
             marker=dict(
                 colors=colors, 
                 colorscale=finviz_colors, 
@@ -795,9 +800,14 @@ if 'df_log' in locals() and not df_log.empty:
                 colorbar=dict(title="騰落率 (%)")
             ),
             # ✅ %{color:+.2f}% を使うことで、確実に小数点2桁に固定します
-            hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>騰落率: %{color:+.2f}%<br>%{customdata}<extra></extra>",
-            customdata=hover_texts,
-            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{color:+.2f}%",
+            hovertemplate="""
+            <b>%{label}</b>
+            <br>資産額: %{value:,.0f}円
+            <br>騰落率: %{customdata:+.2f}%
+            <extra></extra>""",
+            customdata=hover_texts, #これは必要なのか？
+            customdata=custom_vals,
+            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{customdata:+.2f}%"            
         ))
         fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
         st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_v3")
