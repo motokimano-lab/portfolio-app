@@ -781,7 +781,7 @@ if 'df_log' in locals() and not df_log.empty:
                         ids.append(item_id); parents.append(sect_id); labels.append(r["display_name"])
                         values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
                         hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
-                        custom_vals.append(round(r["growth_pct"], 2))  # ←これ追加
+                        custom_vals.append(f"{r['growth_pct']:.2f}")  # ←これ追加
             else:
                 # 米国株などは直接銘柄を表示
                 for _, r in ac_df.iterrows():
@@ -789,7 +789,7 @@ if 'df_log' in locals() and not df_log.empty:
                     ids.append(item_id); parents.append(ac_id); labels.append(r["display_name"])
                     values.append(r["value_jpy_end"]); colors.append(r["growth_pct"])
                     hover_texts.append(f"増減額: {r['diff_val']:+,.0f}円")
-                    custom_vals.append(round(r["growth_pct"], 2))  # ←これ追加
+                    custom_vals.append(f"{r['growth_pct']:.2f}")  # ←これ追加
 
         # 3. 描画
         fig_growth = go.Figure(go.Treemap(
@@ -802,7 +802,7 @@ if 'df_log' in locals() and not df_log.empty:
             ),
             hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>騰落率: %{customdata:+.2f}%<extra></extra>",
             customdata=custom_vals,
-            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{customdata:+.2f}%",
+            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{customdata}%",
         ))
         fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
         st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_v2")
