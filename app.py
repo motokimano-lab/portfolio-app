@@ -672,7 +672,7 @@ def save_daily_log_detail(df):
     return f"{len(rows)} rows saved!"
 
 st.write("DEBUG: コードが読み込まれています！") # これを追加
-st.header("📊 期間比較（成長分析）")
+st.header("📊 期間比較（成長分析）テスト")
 
 # df_logが存在し、空でないことを確認
 if 'df_log' in locals() and not df_log.empty:
@@ -748,7 +748,7 @@ if 'df_log' in locals() and not df_log.empty:
                     colors.append(r["growth_pct"])
                     custom_data.append([f"{r['value_jpy_end']:,.0f}円", f"{r['growth_pct']:+.2f}%"])
 
-        # 3. 描画
+        # 3. 描画（ここを丸ごと差し替え！）
         fig = go.Figure(go.Treemap(
             ids=ids,
             parents=parents,
@@ -762,13 +762,14 @@ if 'df_log' in locals() and not df_log.empty:
                 cmid=0,
                 colorbar=dict(title="騰落率 (%)")
             ),
-            # ✅ 魔法の指定：計算済みのcustomdataだけを表示に使う
+            # ✅ 重要：texttemplate をこう書き換えてください
             texttemplate="<b>%{label}</b><br>%{customdata[0]}<br>%{customdata[1]}",
+            # ✅ 重要：hovertemplate も customdata を使うように書き換えます
             hovertemplate="<b>%{label}</b><br>資産額: %{customdata[0]}<br>騰落率: %{customdata[1]}<extra></extra>"
         ))
 
         fig.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
-        st.plotly_chart(fig, use_container_width=True, key="growth_tree_ultra_final")
-
+        # ✅ 重要：keyを新しくしてキャッシュを強制的に剥がします
+        st.plotly_chart(fig, use_container_width=True, key="growth_tree_v100")
     else:
         st.info("比較するには2つ以上のログデータが必要です。")
