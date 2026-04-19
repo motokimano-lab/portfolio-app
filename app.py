@@ -722,7 +722,7 @@ if 'df_log' in locals() and not df_log.empty:
             lambda r: (r["diff_val"] / r["value_jpy_start"] * 100) if r["value_jpy_start"] != 0 else 0, 
             axis=1
         )
-        d_merged["growth_pct"] = d_merged["growth_pct"].fillna(0)
+        d_merged["growth_pct"] = d_merged["growth_pct"].fillna(0).round(2)
 
         
         # 2. グラフデータの構築
