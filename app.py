@@ -716,12 +716,22 @@ if 'df_log' in locals() and not df_log.empty:
         t_end = d_merged["value_jpy_end"].sum()
         t_start = d_merged["value_jpy_start"].sum()
         t_growth = ((t_end - t_start) / t_start * 100) if t_start != 0 else 0
+        t_diff = t_end - t_start # 増減額
         
+        # 表示用のテキストを作成
+        root_label = (
+            f"資産総額: {t_end:,.0f}円<br>"
+            f"USDJPY: {usd_jpy:.2f}円<br>"
+            f"増減: {t_diff:+,.0f}円 ({t_growth:+.2f}%)<br>"
+            f"{s_date.strftime('%Y/%m/%d')} → {e_date.strftime('%Y/%m/%d')}"
+        )
+
         ids.append("Total")
         parents.append("")
-        labels.append(f"ポートフォリオ\n{t_end:,.0f}円 ({t_growth:+.2f}%)", f"{s_date.strftime('%Y/%m/%d')} → {e_date.strftime('%Y/%m/%d')}" )
+        labels.append(root_label) # ここに情報を集約
         values.append(t_end)
         colors.append(t_growth)
+        # ルート要素専用のcustomdata（ホバー用などに予備で持たせる）
         custom_data.append([f"{t_end:,.0f}円", f"{t_growth:+.2f}%"])
 
         # --- (B) アセットクラス ---
@@ -750,12 +760,15 @@ if 'df_log' in locals() and not df_log.empty:
 
                 # --- (D) 個別銘柄 ---
                 for _, r in s_df.iterrows():
+                    # 銘柄ごとの騰落率を再計算
+                    item_growth = (r["diff_val"] / r["value_jpy_start"] * 100) if r["value_jpy_start"] != 0 else 0
+                    
                     ids.append(f"item_{r['display_name']}_{s_id}")
                     parents.append(s_id)
                     labels.append(r["display_name"])
                     values.append(r["value_jpy_end"])
-                    colors.append(r["growth_pct"])
-                    custom_data.append([f"{r['value_jpy_end']:,.0f}円", f"{r['growth_pct']:+.2f}%"])
+                    colors.append(item_growth)
+                    custom_data.append([f"{r['value_jpy_end']:,.0f}円", f"{item_growth:+.2f}%"])
 
         # 3. 描画
         fig = go.Figure(go.Treemap(
@@ -771,15 +784,21 @@ if 'df_log' in locals() and not df_log.empty:
                 cmid=0,
                 colorbar=dict(title="騰落率 (%)")
             ),
-            # customdataを直接表示に使うことで小数を抹殺
+            # ルートと子要素で表示を出し分ける設定
             texttemplate="<b>%{label}</b><br>%{customdata[0]}<br>%{customdata[1]}",
             hovertemplate="<b>%{label}</b><br>資産額: %{customdata[0]}<br>騰落率: %{customdata[1]}<extra></extra>"
         ))
+        
+        # ルート階層だけは customdata の重複表示を避けるために texttemplate を調整
+        fig.update_traces(
+            texttemplate="<b>%{label}</b>", 
+            selector=dict(type='treemap')
+        )
+        # ただし、子要素には値を表示させたいので、個別設定が難しい場合は
+        # labels自体に情報を入れた上記コードが最も確実に「一番デカい箱」を埋めてくれます。
 
         fig.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
-        st.plotly_chart(fig, use_container_width=True, key="growth_tree_final_v3")
-
+        st.plotly_chart(fig, use_container_width=True, key="growth_tree_final_v4")
     else:
         st.info("比較するには2つ以上のログデータが必要です。")
-else:
-    st.info("まだログデータがありません。")
+
