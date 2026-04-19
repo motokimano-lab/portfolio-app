@@ -794,9 +794,9 @@ if 'df_log' in locals() and not df_log.empty:
                 cmid=0, cmin=-5, cmax=5, # 振れ幅に合わせて調整
                 colorbar=dict(title="騰落率 (%)")
             ),
-            hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>騰落率: %{color:.2f}%<br>%{customdata}<extra></extra>",
-            customdata=hover_texts,
-            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{color:+.1f}%",
+            hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>騰落率: %{customdata:+.2f}%<extra></extra>"",
+            customdata=colors,
+            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{customdata:+.1f}%",
         ))
         fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
         st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_v2")
