@@ -800,9 +800,9 @@ if 'df_log' in locals() and not df_log.empty:
                 cmid=0, cmin=-5, cmax=5, # 振れ幅に合わせて調整
                 colorbar=dict(title="騰落率 (%)")
             ),
-            hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>騰落率: %{customdata:+.2f}%<extra></extra>",
-            customdata=custom_vals,
-            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br><span style='color:white'>%{customdata:+.2f}%</span>",
+            hovertemplate="<b>%{label}</b><br>資産額: %{value:,.0f}円<br>騰落率: %{customdata[0]:+.2f}%<extra></extra>",
+            customdata=[[v] for v in custom_vals],
+            texttemplate="<b>%{label}</b><br>%{value:,.0f}円<br>%{customdata[0]:+.2f}%",
         ))
         fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
         st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_v2")
