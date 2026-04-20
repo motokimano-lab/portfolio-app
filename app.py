@@ -670,10 +670,14 @@ def save_daily_log_detail(df):
     sheet.append_rows(rows)
 
     return f"{len(rows)} rows saved!"
-    if st.button("📅 今日の資産を記録"):
-    result = save_daily_log_detail(df_filtered)
-    st.success(result)
+st.markdown("---")
+st.subheader("📅 データ記録")
 
+if st.button("📅 今日の資産を記録"):
+    with st.spinner("保存中..."):
+        result = save_daily_log_detail(df_filtered)
+    st.success(result)
+    
 st.header("📊 期間比較（成長分析）")
 
 # df_logが存在し、空でないことを確認
