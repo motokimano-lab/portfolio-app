@@ -80,6 +80,7 @@ def calc_after_tax_dividend(row):
         return annual_div_jpy if acc_type == "NISA" else annual_div_jpy * (1 - 0.20315)
     return annual_div_jpy * (1 - 0.20315)
 
+@st.cache_data(ttl=3600)
 def load_daily_log_detail():
 
     scope = [
