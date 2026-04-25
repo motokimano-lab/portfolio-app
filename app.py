@@ -17,31 +17,31 @@ st.title("My Portfolio Management")
 
 # ========= 2. 各種データ取得・関数定義 =========
 
-@st.cache_data(ttl=3600)
+import time
+
+@st.cache_data(ttl=600)
 def get_price(ticker, cost_price, fallback_price=None):
     if ticker == "CASH":
         return 1, False
 
-    try:
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period="5d")
+    for attempt in range(3):  # 最大3回 retry
+        try:
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="5d")
 
-        if not hist.empty:
-            return hist["Close"].dropna().iloc[-1], False
-    except:
-        pass
+            if not hist.empty:
+                price = hist["Close"].dropna().iloc[-1]
+                return price, False
 
+        except Exception as e:
+            print(f"{ticker} retry {attempt + 1}/3 failed")
+            time.sleep(2)  # 少し待って再試行
+
+    # 3回失敗したら fallback
     if fallback_price is not None:
         return fallback_price, True
 
     return cost_price, True
-
-    # 👇 fallback優先順位
-    if fallback_price is not None:
-        return fallback_price
-
-    return cost_price
-
 @st.cache_data(ttl=3600)
 def get_fx(symbol, default):
     try:
