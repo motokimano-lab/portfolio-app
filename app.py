@@ -226,7 +226,7 @@ for ticker in unique_tickers:
     if div == 0 and ticker not in ["CASH", "VOO", "BTC-JPY", "ETH-JPY"]:
         div_warning_tickers.append(ticker)
 
-iif div_warning_tickers:
+if div_warning_tickers:
     st.sidebar.warning(
         f"配当取得要確認: {', '.join(div_warning_tickers)}"
     )
