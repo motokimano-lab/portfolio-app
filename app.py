@@ -686,9 +686,20 @@ def save_daily_log_detail(df):
             float(r["value_jpy"]) if pd.notna(r["value_jpy"]) else 0
         ])
 
-    sheet.append_rows(rows)
+    # 既存データ取得
+    existing_data = sheet.get_all_values()
 
-    return f"{len(rows)} rows saved!"
+    # 今日のデータを除外（上書き用）
+    filtered_data = [
+        row for row in existing_data
+        if len(row) == 0 or row[0] != today
+    ]
+
+    # シートを更新
+    sheet.clear()
+    sheet.update(filtered_data + rows)
+
+    return f"{len(rows)} rows saved (overwrite mode)"
 st.markdown("---")
 st.subheader("📅 データ記録")
 
