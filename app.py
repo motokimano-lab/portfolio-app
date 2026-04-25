@@ -19,15 +19,21 @@ st.title("My Portfolio Management")
 @st.cache_data(ttl=3600)
 def get_price(ticker, cost_price, fallback_price=None):
     if ticker == "CASH":
-        return 1
+        return 1, False
+
     try:
         stock = yf.Ticker(ticker)
         hist = stock.history(period="5d")
 
         if not hist.empty:
-            return hist["Close"].dropna().iloc[-1]
+            return hist["Close"].dropna().iloc[-1], False
     except:
         pass
+
+    if fallback_price is not None:
+        return fallback_price, True
+
+    return cost_price, True
 
     # 👇 fallback優先順位
     if fallback_price is not None:
@@ -142,6 +148,7 @@ def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
 unique_tickers = df["ticker"].unique()
 
 price_dict = {}
+warning_tickers = []
 
 for ticker in unique_tickers:
     if ticker == "CASH":
@@ -152,12 +159,26 @@ for ticker in unique_tickers:
             "cost_price"
         ].iloc[0]
 
-        price_dict[ticker] = get_price(
+        # get_price() から
+        # (price, fallback_used)
+        # を受け取る
+        price, used_fallback = get_price(
             ticker,
             fallback_price
         )
 
+        price_dict[ticker] = price
+
+        if used_fallback:
+            warning_tickers.append(ticker)
+
 df["price"] = df["ticker"].map(price_dict)
+
+# ← ここで警告表示
+if warning_tickers:
+    st.warning(
+        f"価格取得に失敗した銘柄があります: {', '.join(warning_tickers)}"
+    )
 
 df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
@@ -193,6 +214,19 @@ selected_owners = st.sidebar.multiselect("名義を選択", all_owners, default=
 
 all_accounts = df["account_type"].unique().tolist()
 selected_accounts = st.sidebar.multiselect("口座種別を選択", all_accounts, default=all_accounts)
+
+# ========= キャッシュ更新 =========
+st.sidebar.header("🔄 データ更新")
+
+if st.sidebar.button("最新データを再取得"):
+    get_price.clear()
+    get_performance.clear()
+    get_dividend_data.clear()
+    get_fx.clear()
+    load_daily_log_detail.clear()
+
+    st.sidebar.success("最新データを再取得します")
+
 
 # データの絞り込み実行
 mask = df["account_type"].isin(selected_accounts)
