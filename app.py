@@ -6,6 +6,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import os
+import json
 
 
 # ========= 1. データ読み込み =========
@@ -95,7 +97,14 @@ def load_daily_log_detail():
         "https://www.googleapis.com/auth/drive"
     ]
 
-    creds_dict = dict(st.secrets["gcp_service_account"])
+    if "GCP_SERVICE_ACCOUNT" in os.environ:
+    creds_dict = json.loads(
+        os.environ["GCP_SERVICE_ACCOUNT"]
+    )
+else:
+    creds_dict = dict(
+        st.secrets["gcp_service_account"]
+    )
 
     creds = ServiceAccountCredentials.from_json_keyfile_dict(
         creds_dict, scope
@@ -753,7 +762,14 @@ def save_daily_log_detail(df):
         "https://www.googleapis.com/auth/drive"
     ]
 
-    creds_dict = dict(st.secrets["gcp_service_account"])
+    if "GCP_SERVICE_ACCOUNT" in os.environ:
+    creds_dict = json.loads(
+        os.environ["GCP_SERVICE_ACCOUNT"]
+    )
+else:
+    creds_dict = dict(
+        st.secrets["gcp_service_account"]
+    )
 
     creds = ServiceAccountCredentials.from_json_keyfile_dict(
         creds_dict, scope
