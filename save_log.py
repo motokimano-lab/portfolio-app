@@ -6,9 +6,9 @@ from oauth2client.service_account import ServiceAccountCredentials
 import streamlit as st
 
 # app.py にある関数を使う
-def get_fx()
-def prepare_base_dataframe()
-def save_daily_log_detail()
+def get_fx():
+def prepare_base_dataframe():
+def save_daily_log_detail():
 
 # 元データ読み込み
 url = "あなたのCSV URL"
