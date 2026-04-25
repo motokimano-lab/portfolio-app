@@ -105,19 +105,13 @@ usd_jpy = get_fx("JPY=X", 150)
 vnd_jpy = get_fx("VNDJPY=X", 0.006)
 
 # ========= 3. メイン計算処理 (すべて先に終わらせる) =========
-
 # 基本数値
 df["price"] = df.apply(
     lambda r: get_price(r["ticker"], r["cost_price"], r.get("price")),
     axis=1
 )
-df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
-df["price"] = pd.to_numeric(df["price"], errors="coerce")
-df["cost_price"] = pd.to_numeric(df["cost_price"], errors="coerce")
-df["value"] = df["price"] * df["quantity"]
 
-# 円建て評価額
-df["value_jpy"] = df.apply(lambda r: r["value"] * usd_jpy if r["currency"] == "USD" else (r["value"] * vnd_jpy if r["currency"] == "VND" else r["value"]), axis=1)
+df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
 # 配当計算
 df["div_yield"] = df["ticker"].apply(get_dividend_data)
@@ -129,9 +123,6 @@ df["profit_pct"] = df.apply(lambda r: 0 if r["ticker"] == "CASH" else (r["price"
 perf_data = df["ticker"].apply(get_performance)
 df["daily_pct"] = [x[0] for x in perf_data]
 df["ytd_pct"] = [x[1] for x in perf_data]
-
-# セクター階層作成
-df["sector_group"] = df.apply(lambda r: r["sector"] if pd.notna(r["sector"]) and str(r["sector"]).strip() != "" else "未分類", axis=1)
 
 # ========= 4. フィルター設定 (サイドバー) =========
 st.sidebar.header("🔍 フィルター設定")
