@@ -134,10 +134,25 @@ def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
 
 # ========= 3. メイン計算処理 (すべて先に終わらせる) =========
 # 基本数値
-df["price"] = df.apply(
-    lambda r: get_price(r["ticker"], r["cost_price"], r.get("price")),
-    axis=1
-)
+unique_tickers = df["ticker"].unique()
+
+price_dict = {}
+
+for ticker in unique_tickers:
+    if ticker == "CASH":
+        price_dict[ticker] = 1
+    else:
+        fallback_price = df.loc[
+            df["ticker"] == ticker,
+            "cost_price"
+        ].iloc[0]
+
+        price_dict[ticker] = get_price(
+            ticker,
+            fallback_price
+        )
+
+df["price"] = df["ticker"].map(price_dict)
 
 df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
