@@ -110,7 +110,6 @@ def load_daily_log_detail():
 
     return df_log
 
-
 # 為替取得
 usd_jpy = get_fx("JPY=X", 150)
 vnd_jpy = get_fx("VNDJPY=X", 0.006)
@@ -174,12 +173,6 @@ for ticker in unique_tickers:
 
 df["price"] = df["ticker"].map(price_dict)
 
-# ← ここで警告表示
-if warning_tickers:
-    st.warning(
-        f"価格取得に失敗した銘柄があります: {', '.join(warning_tickers)}"
-    )
-
 df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
 # 配当計算
@@ -214,6 +207,15 @@ selected_owners = st.sidebar.multiselect("名義を選択", all_owners, default=
 
 all_accounts = df["account_type"].unique().tolist()
 selected_accounts = st.sidebar.multiselect("口座種別を選択", all_accounts, default=all_accounts)
+
+st.sidebar.header("📡 データ取得状態")
+
+if warning_tickers:
+    st.sidebar.warning(
+        f"価格取得失敗: {', '.join(warning_tickers)}"
+    )
+else:
+    st.sidebar.success("データ取得異常なし")
 
 # ========= キャッシュ更新 =========
 st.sidebar.header("🔄 データ更新")
