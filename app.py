@@ -157,15 +157,29 @@ df["price"] = df["ticker"].map(price_dict)
 df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
 # 配当計算
-df["div_yield"] = df["ticker"].apply(get_dividend_data)
+dividend_dict = {}
+
+for ticker in unique_tickers:
+    dividend_dict[ticker] = get_dividend_data(ticker)
+
+df["div_yield"] = df["ticker"].map(dividend_dict)
 df["annual_div_jpy"] = df["value_jpy"] * df["div_yield"]
 df["after_tax_div_jpy"] = df.apply(calc_after_tax_dividend, axis=1)
 
 # 損益・パフォーマンス
 df["profit_pct"] = df.apply(lambda r: 0 if r["ticker"] == "CASH" else (r["price"] - r["cost_price"]) / r["cost_price"] * 100, axis=1)
-perf_data = df["ticker"].apply(get_performance)
-df["daily_pct"] = [x[0] for x in perf_data]
-df["ytd_pct"] = [x[1] for x in perf_data]
+performance_dict = {}
+
+for ticker in unique_tickers:
+    performance_dict[ticker] = get_performance(ticker)
+
+df["daily_pct"] = df["ticker"].map(
+    lambda x: performance_dict[x][0]
+)
+
+df["ytd_pct"] = df["ticker"].map(
+    lambda x: performance_dict[x][1]
+)
 
 # ========= 4. フィルター設定 (サイドバー) =========
 st.sidebar.header("🔍 フィルター設定")
