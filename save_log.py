@@ -9,6 +9,7 @@ import streamlit as st
 from app import (
     prepare_base_dataframe,
     get_fx,
+    get_price,
     save_daily_log_detail
 )
 
@@ -52,7 +53,3 @@ else:
     result = save_daily_log_detail(df)
     print(result)
 
-# 保存実行
-result = save_daily_log_detail(df)
-
-print(result)
