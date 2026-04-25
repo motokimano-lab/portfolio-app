@@ -739,7 +739,7 @@ st.subheader("📅 データ記録")
 
 if st.button("📅 今日の資産を記録"):
     with st.spinner("保存中..."):
-        result = save_daily_log_detail(df_filtered)
+        result = save_daily_log_detail(df)
 
     load_daily_log_detail.clear()
 
