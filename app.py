@@ -16,6 +16,7 @@ st.title("My Portfolio Management")
 
 # ========= 2. 各種データ取得・関数定義 =========
 
+@st.cache_data(ttl=3600)
 def get_price(ticker, cost_price, fallback_price=None):
     if ticker == "CASH":
         return 1
@@ -34,12 +35,14 @@ def get_price(ticker, cost_price, fallback_price=None):
 
     return cost_price
 
+@st.cache_data(ttl=3600)
 def get_fx(symbol, default):
     try:
         fx = yf.Ticker(symbol)
         return fx.history(period="1d")["Close"].iloc[-1]
     except: return default
 
+@st.cache_data(ttl=3600)
 def get_dividend_data(ticker):
     exclude_tickers = ["CASH", "VOO"]
     if ticker in exclude_tickers: return 0.0
@@ -51,6 +54,7 @@ def get_dividend_data(ticker):
         return div_yield
     except: return 0.0
 
+@st.cache_data(ttl=3600)
 def get_performance(ticker):
     if ticker == "CASH": return 0.0, 0.0
     try:
@@ -735,6 +739,9 @@ st.subheader("📅 データ記録")
 if st.button("📅 今日の資産を記録"):
     with st.spinner("保存中..."):
         result = save_daily_log_detail(df_filtered)
+
+    load_daily_log_detail.clear()
+
     st.success(result)
     
 st.header("📊 期間比較（成長分析）")
