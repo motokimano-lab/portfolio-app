@@ -98,9 +98,9 @@ def load_daily_log_detail():
     ]
 
     if "GCP_SERVICE_ACCOUNT" in os.environ:
-    creds_dict = json.loads(
-        os.environ["GCP_SERVICE_ACCOUNT"]
-    )
+        creds_dict = json.loads(
+            os.environ["GCP_SERVICE_ACCOUNT"]
+        )
 else:
     creds_dict = dict(
         st.secrets["gcp_service_account"]
@@ -763,9 +763,9 @@ def save_daily_log_detail(df):
     ]
 
     if "GCP_SERVICE_ACCOUNT" in os.environ:
-    creds_dict = json.loads(
-        os.environ["GCP_SERVICE_ACCOUNT"]
-    )
+        creds_dict = json.loads(
+            os.environ["GCP_SERVICE_ACCOUNT"]
+        )
 else:
     creds_dict = dict(
         st.secrets["gcp_service_account"]
