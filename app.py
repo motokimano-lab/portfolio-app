@@ -3,6 +3,7 @@ import streamlit as st
 import yfinance as yf
 import plotly.express as px
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
@@ -261,7 +262,9 @@ selected_color_col = color_map.get(color_option, "profit_pct")
 # ========= 5. 表示セクション =========
 # 現在の時刻を取得して、好きな形式の文字列にする
 # 実行した瞬間の「年/月/日 時:分」が作成されます
-current_time = datetime.now().strftime("%Y/%m/%d %H:%M")
+current_time = datetime.now(
+    ZoneInfo("Asia/Tokyo")
+).strftime("%Y/%m/%d %H:%M")
 
 # --- (A) 対前日の計算 ---
 # 実際の列名 "daily_pct" を指定します
@@ -350,7 +353,9 @@ df_grouped = df_map.groupby(['asset_class', 'sector_group', 'display_name'], dro
 }).reset_index()
 
 # 実行した瞬間の「年/月/日 時:分」が作成されます
-current_time = datetime.now().strftime("%Y/%m/%d %H:%M")
+current_time = datetime.now(
+    ZoneInfo("Asia/Tokyo")
+).strftime("%Y/%m/%d %H:%M")
 
 # カスタムラベル（M表記付き）の作成
 total_val = df_grouped["value_jpy"].sum()
@@ -759,7 +764,9 @@ def save_daily_log_detail(df):
     spreadsheet = client.open("portfolio_data")
     sheet = spreadsheet.worksheet("Daily_Log")
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(
+    ZoneInfo("Asia/Tokyo")
+).strftime("%Y-%m-%d")
 
     rows = []
     for _, r in df.iterrows():
