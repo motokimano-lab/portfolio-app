@@ -101,10 +101,10 @@ def load_daily_log_detail():
         creds_dict = json.loads(
             os.environ["GCP_SERVICE_ACCOUNT"]
         )
-else:
-    creds_dict = dict(
-        st.secrets["gcp_service_account"]
-    )
+    else:
+        creds_dict = dict(
+            st.secrets["gcp_service_account"]
+        )
 
     creds = ServiceAccountCredentials.from_json_keyfile_dict(
         creds_dict, scope
@@ -766,10 +766,10 @@ def save_daily_log_detail(df):
         creds_dict = json.loads(
             os.environ["GCP_SERVICE_ACCOUNT"]
         )
-else:
-    creds_dict = dict(
-        st.secrets["gcp_service_account"]
-    )
+    else:
+        creds_dict = dict(
+            st.secrets["gcp_service_account"]
+        )
 
     creds = ServiceAccountCredentials.from_json_keyfile_dict(
         creds_dict, scope
