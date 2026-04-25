@@ -229,6 +229,19 @@ if st.sidebar.button("最新データを再取得"):
 
     st.sidebar.success("最新データを再取得します")
 
+div_warning_tickers = []
+
+for ticker in unique_tickers:
+    div = get_dividend_data(ticker)
+    dividend_dict[ticker] = div
+
+    if div == 0 and ticker not in ["CASH", "VOO", "BTC-JPY", "ETH-JPY"]:
+        div_warning_tickers.append(ticker)
+
+if div_warning_tickers:
+    st.sidebar.warning(
+        f"配当取得要確認: {', '.join(div_warning_tickers)}"
+    )
 
 # データの絞り込み実行
 mask = df["account_type"].isin(selected_accounts)
