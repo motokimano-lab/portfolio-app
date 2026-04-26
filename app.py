@@ -704,60 +704,8 @@ st.dataframe(df_filtered[["ticker", "display_name", "div_yield", "annual_div_jpy
 #資産記録
 import json
 
-def save_daily_log_detail(df):
+#functionsに移植済み
 
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ]
-
-    if "GCP_SERVICE_ACCOUNT" in os.environ:
-        creds_dict = json.loads(
-            os.environ["GCP_SERVICE_ACCOUNT"]
-        )
-    else:
-        creds_dict = dict(
-            st.secrets["gcp_service_account"]
-        )
-
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(
-        creds_dict, scope
-    )
-
-    client = gspread.authorize(creds)
-
-    spreadsheet = client.open("portfolio_data")
-    sheet = spreadsheet.worksheet("Daily_Log")
-
-    today = datetime.now(
-    ZoneInfo("Asia/Tokyo")
-).strftime("%Y-%m-%d")
-
-    rows = []
-    for _, r in df.iterrows():
-        rows.append([
-            today,
-            str(r["ticker"]) if pd.notna(r["ticker"]) else "",
-            str(r["display_name"]) if pd.notna(r["display_name"]) else "",
-            str(r["asset_class"]) if pd.notna(r["asset_class"]) else "",
-            str(r["sector"]) if pd.notna(r["sector"]) else "",
-            float(r["value_jpy"]) if pd.notna(r["value_jpy"]) else 0
-        ])
-
-    # 既存データ取得
-    existing_data = sheet.get_all_values()
-
-    # 今日のデータを除外（上書き用）
-    filtered_data = [
-        row for row in existing_data
-        if len(row) == 0 or row[0] != today
-    ]
-
-    # シートを更新
-    sheet.clear()
-    sheet.update(filtered_data + rows)
-
-    return f"{len(rows)} rows saved (overwrite mode)"
 st.markdown("---")
 st.subheader("📅 データ記録")
 
