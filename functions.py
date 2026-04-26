@@ -67,7 +67,7 @@ def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
     df["value"] = df["price"] * df["quantity"]
 
     print("=== AFTER value calc ===")
-    print(df[["ticker", "quantity", "price", "value", "value_jpy"]])
+    print(df[["ticker", "quantity", "price", "value"]])
     print("usd_jpy =", usd_jpy)
     print("vnd_jpy =", vnd_jpy)
     
