@@ -11,7 +11,8 @@ import json
 from functions import (
     get_fx,
     get_price,
-    prepare_base_dataframe
+    prepare_base_dataframe,
+    save_daily_log_detail
 )
 
 # ========= 1. データ読み込み =========
