@@ -18,29 +18,37 @@ def get_fx(symbol, default):
         return default
 
 
+import time
+
 @st.cache_data(ttl=3600)
 def get_price(ticker, cost_price, fallback_price=None):
     if ticker == "CASH":
         return 1, False
 
-    try:
-        print(f"価格取得開始: {ticker}")
+    max_retry = 3
 
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period="5d")
+    for attempt in range(max_retry):
+        try:
+            print(f"{ticker} 価格取得開始（{attempt+1}/{max_retry}回目）")
 
-        print(f"{ticker} history:")
-        print(hist.tail())
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="5d")
 
-        if not hist.empty:
-            price = hist["Close"].dropna().iloc[-1]
-            print(f"{ticker} price取得成功: {price}")
-            return price, False
+            if not hist.empty:
+                price = hist["Close"].dropna().iloc[-1]
+                print(f"{ticker} price取得成功: {price}")
+                return price, False
 
-        print(f"{ticker} history empty")
+            print(f"{ticker} history empty")
 
-    except Exception as e:
-        print(f"{ticker} エラー発生: {e}")
+        except Exception as e:
+            print(f"{ticker} エラー: {e}")
+
+        if attempt < max_retry - 1:
+            print(f"{ticker} 30秒後に再試行します")
+            time.sleep(30)
+
+    print(f"{ticker} 全リトライ失敗")
 
     if fallback_price is not None:
         print(f"{ticker} fallback_price使用: {fallback_price}")
@@ -48,7 +56,6 @@ def get_price(ticker, cost_price, fallback_price=None):
 
     print(f"{ticker} cost_price使用: {cost_price}")
     return cost_price, True
-
 def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
     df = df.copy()
 
