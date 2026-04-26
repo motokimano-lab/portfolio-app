@@ -8,7 +8,11 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import os
 import json
-from functions import get_fx, get_price
+from functions import (
+    get_fx,
+    get_price,
+    prepare_base_dataframe
+)
 
 # ========= 1. データ読み込み =========
 url = "https://docs.google.com/spreadsheets/d/18PLN9uJHxVZCAvAw92piWCniLlQ2i8Z6dT8ok_jycBI/export?format=csv&gid=0"
