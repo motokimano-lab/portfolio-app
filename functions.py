@@ -24,17 +24,29 @@ def get_price(ticker, cost_price, fallback_price=None):
         return 1, False
 
     try:
+        print(f"価格取得開始: {ticker}")
+
         stock = yf.Ticker(ticker)
         hist = stock.history(period="5d")
 
+        print(f"{ticker} history:")
+        print(hist.tail())
+
         if not hist.empty:
-            return hist["Close"].dropna().iloc[-1], False
-    except:
-        pass
+            price = hist["Close"].dropna().iloc[-1]
+            print(f"{ticker} price取得成功: {price}")
+            return price, False
+
+        print(f"{ticker} history empty")
+
+    except Exception as e:
+        print(f"{ticker} エラー発生: {e}")
 
     if fallback_price is not None:
+        print(f"{ticker} fallback_price使用: {fallback_price}")
         return fallback_price, True
 
+    print(f"{ticker} cost_price使用: {cost_price}")
     return cost_price, True
 
 def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
