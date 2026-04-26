@@ -13,6 +13,24 @@ def get_fx(symbol, default):
     except:
         return default
 
+def get_price(ticker, cost_price, fallback_price=None):
+    if ticker == "CASH":
+        return 1, False
+
+    try:
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="5d")
+
+        if not hist.empty:
+            return hist["Close"].dropna().iloc[-1], False
+
+    except:
+        pass
+
+    if fallback_price is not None:
+        return fallback_price, True
+
+    return cost_price, True
 
 def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
     df = df.copy()
