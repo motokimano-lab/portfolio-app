@@ -8,7 +8,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import os
 import json
-
+from functions import get_fx, get_price
 
 # ========= 1. データ読み込み =========
 url = "https://docs.google.com/spreadsheets/d/18PLN9uJHxVZCAvAw92piWCniLlQ2i8Z6dT8ok_jycBI/export?format=csv&gid=0"
@@ -21,35 +21,6 @@ st.title("My Portfolio Management")
 
 import time
 
-@st.cache_data(ttl=600)
-def get_price(ticker, cost_price, fallback_price=None):
-    if ticker == "CASH":
-        return 1, False
-
-    for attempt in range(3):  # 最大3回 retry
-        try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="5d")
-
-            if not hist.empty:
-                price = hist["Close"].dropna().iloc[-1]
-                return price, False
-
-        except Exception as e:
-            print(f"{ticker} retry {attempt + 1}/3 failed")
-            time.sleep(2)  # 少し待って再試行
-
-    # 3回失敗したら fallback
-    if fallback_price is not None:
-        return fallback_price, True
-
-    return cost_price, True
-@st.cache_data(ttl=3600)
-def get_fx(symbol, default):
-    try:
-        fx = yf.Ticker(symbol)
-        return fx.history(period="1d")["Close"].iloc[-1]
-    except: return default
 
 @st.cache_data(ttl=3600)
 def get_dividend_data(ticker):
