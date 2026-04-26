@@ -40,14 +40,25 @@ def get_price(ticker, cost_price, fallback_price=None):
 def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
     df = df.copy()
 
+    print("=== prepare_base_dataframe BEFORE ===")
+    print(df[["ticker", "quantity", "price", "currency"]])
+
     # 数値変換
     numeric_cols = ["quantity", "price", "cost_price"]
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    print("=== AFTER to_numeric ===")
+    print(df[["ticker", "quantity", "price", "currency"]])
+
     # 評価額
     df["value"] = df["price"] * df["quantity"]
 
+    print("=== AFTER value calc ===")
+    print(df[["ticker", "quantity", "price", "value", "value_jpy"]])
+    print("usd_jpy =", usd_jpy)
+    print("vnd_jpy =", vnd_jpy)
+    
     # 円換算
     def convert_to_jpy(row):
         if row["currency"] == "USD":
