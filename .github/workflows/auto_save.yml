@@ -19,5 +19,7 @@ jobs:
       - name: Install packages
         run: pip install -r requirements.txt
 
-      - name: Run save_log.py
+      - name: Run save log
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
         run: python save_log.py
