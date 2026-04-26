@@ -222,7 +222,7 @@ if st.sidebar.button("最新データを再取得"):
     get_price.clear()
     get_performance.clear()
     get_dividend_data.clear()
-    get_fx.clear()
+    
     load_daily_log_detail.clear()
 
     st.sidebar.success("最新データを再取得します")
