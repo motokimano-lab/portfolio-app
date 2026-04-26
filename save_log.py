@@ -98,8 +98,10 @@ def save_daily_log_detail(df):
     return f"{len(rows)} rows saved (overwrite mode)"
 
 # 元データ読み込み
-url = "あなたのCSV URL"
+url = "https://docs.google.com/spreadsheets/d/18PLN9uJHxVZCAvAw92piWCniLlQ2i8Z6dT8ok_jycBI/export?format=csv&gid=0"
 df = pd.read_csv(url)
+
+
 
 # 為替取得
 usd_jpy = get_fx("JPY=X", 150)
