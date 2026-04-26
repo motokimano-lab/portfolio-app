@@ -76,8 +76,8 @@ def save_daily_log_detail(df):
         creds_dict = json.loads(
             os.environ["GCP_SERVICE_ACCOUNT"]
         )
-        else:
-            creds_dict = dict(
+    else:
+        creds_dict = dict(
             st.secrets["gcp_service_account"]
         )
 
@@ -91,8 +91,8 @@ def save_daily_log_detail(df):
     sheet = spreadsheet.worksheet("Daily_Log")
 
     today = datetime.now(
-    ZoneInfo("Asia/Tokyo")
-).strftime("%Y-%m-%d")
+        ZoneInfo("Asia/Tokyo")
+    ).strftime("%Y-%m-%d")
 
     rows = []
     for _, r in df.iterrows():
@@ -105,16 +105,13 @@ def save_daily_log_detail(df):
             float(r["value_jpy"]) if pd.notna(r["value_jpy"]) else 0
         ])
 
-    # 既存データ取得
     existing_data = sheet.get_all_values()
 
-    # 今日のデータを除外（上書き用）
     filtered_data = [
         row for row in existing_data
         if len(row) == 0 or row[0] != today
     ]
 
-    # シートを更新
     sheet.clear()
     sheet.update(filtered_data + rows)
 
