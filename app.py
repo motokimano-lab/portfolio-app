@@ -153,9 +153,12 @@ for ticker in all_tickers: # unique_tickers から all_tickers に変更
     if div == 0 and ticker not in ["CASH", "VOO", "BTC-JPY", "ETH-JPY"]:
         div_warning_tickers.append(ticker)
 
-if div_errors:
-    st.sidebar.error(f"❌ 配当取得失敗: {', '.join(div_errors)}")
-elif div_warning_tickers:
+# --- 配当・データ取得の警告表示 ---
+if errors:
+    # 以前の div_errors の代わりに、一括取得で発生した errors を表示します
+    st.sidebar.error(f"❌ データ取得失敗: {', '.join(errors)}")
+    
+if div_warning_tickers:
     st.sidebar.warning(f"⚠️ 配当要確認: {', '.join(div_warning_tickers)}")
 else:
     st.sidebar.success("✅ 配当データ取得：正常")
