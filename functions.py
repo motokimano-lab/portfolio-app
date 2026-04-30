@@ -44,11 +44,13 @@ def get_prices_bulk(tickers):
 
 
 # --- 配当（ダミー） ---
+@st.cache_data(ttl=300)
 def get_dividends(tickers):
     return {t: 0.0 for t in tickers}, []
 
 
 # --- パフォーマンス（ダミー） ---
+@st.cache_data(ttl=300)
 def get_performance(tickers):
     return {t: (0.0, 0.0) for t in tickers}, []
 
