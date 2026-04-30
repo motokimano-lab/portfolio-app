@@ -39,7 +39,9 @@ st.title("My Portfolio Management")
 
 import time
 
-
+@st.cache_data(ttl=300)
+def load_prices(tickers):
+    return get_prices_bulk(tickers)
 
 def calc_after_tax_dividend(row):
     annual_div_jpy = row["annual_div_jpy"]
@@ -102,7 +104,7 @@ df = df[df["ticker"].str.match(r"^[A-Z0-9\.\-]+$")]
 # CASHは除外
 df = df[df["ticker"] != "CASH"]
 
-unique_tickers = df["ticker"].drop_duplicates()[:30]#テスト用（後で消す）
+unique_tickers = clean_tickers(df["ticker"].unique())
 #本来のコード unique_tickers = df["ticker"].unique()
 
 price_dict = {}
@@ -130,7 +132,7 @@ for ticker in unique_tickers:
         if used_fallback:
             warning_tickers.append(ticker)
 
-df["price"] = df["ticker"].map(price_dict)
+df["price"] = df["ticker"].map(lambda x: price_dict.get(x))
 
 df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
