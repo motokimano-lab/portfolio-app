@@ -104,7 +104,7 @@ df["ticker"] = df["ticker"].astype(str).str.strip()
 df = df[df["ticker"].str.match(r"^[A-Z0-9\.\-]+$")]
 
 # CASHは除外
-df = df[df["ticker"] != "CASH"]
+#df = df[df["ticker"] != "CASH"]
 
 unique_tickers = clean_tickers(df["ticker"].unique())
 #本来のコード unique_tickers = df["ticker"].unique()
