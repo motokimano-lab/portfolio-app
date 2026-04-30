@@ -14,34 +14,30 @@ def get_fx(symbol, default):
 
 # --- 価格（これだけ使う） ---
 def get_prices_bulk(tickers):
+    if not tickers:
+        return {}
     try:
-        df = yf.download(
-            tickers=tickers,
-            period="1d",
-            group_by="ticker",
-            threads=True,
-            progress=False
-        )
-
+        # 期間を1dから5dに延ばすと、休日明けでもデータが取りやすくなります
+        data = yf.download(tickers, period="5d", group_by='ticker', progress=False)
+        
         price_dict = {}
-
         for t in tickers:
             try:
                 if len(tickers) == 1:
-                    price = df["Close"].iloc[-1]
+                    # 1件のみの場合、列名が直接 "Close" になることがある
+                    temp_df = data
                 else:
-                    price = df[t]["Close"].iloc[-1]
-
-                price_dict[t] = price
+                    temp_df = data[t]
+                
+                # 直近の有効な（NaNでない）終値を取得
+                last_price = temp_df["Close"].dropna().iloc[-1]
+                price_dict[t] = float(last_price)
             except:
                 price_dict[t] = None
-
         return price_dict
-
     except Exception as e:
-        print("bulk取得エラー:", e)
+        print(f"Bulk fetch error: {e}")
         return {t: None for t in tickers}
-
 
 # --- 配当（ダミー） ---
 def get_dividends(tickers):
