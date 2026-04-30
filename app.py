@@ -121,15 +121,11 @@ df["after_tax_div_jpy"] = df.apply(calc_after_tax_dividend, axis=1)
 
 # 損益・パフォーマンス
 df["profit_pct"] = df.apply(lambda r: 0 if r["ticker"] == "CASH" else (r["price"] - r["cost_price"]) / r["cost_price"] * 100, axis=1)
-df["daily_pct"] = df["day_diff_pct"] 
-df["daily_val"] = df["day_diff_val"]
-df["daily_pct"] = df["ticker"].map(
-    lambda x: performance_dict.get(x, [0, 0])[0]
-)
 
-df["ytd_pct"] = df["ticker"].map(
-    lambda x: performance_dict.get(x, [0, 0])[1]
-)
+# --- パフォーマンスデータの流し込み ---
+# すでに df["day_diff_pct"] に値を入れているので、それを利用するだけです
+df["daily_pct"] = df["day_diff_pct"]
+df["daily_val"] = df["day_diff_val"]
 
 # ========= 4. フィルター設定 (サイドバー) =========
 st.sidebar.header("🔍 フィルター設定")
