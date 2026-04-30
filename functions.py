@@ -55,7 +55,7 @@ def get_price(ticker, cost_price, fallback_price=None):
 
     return cost_price, True
     
-    def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
+def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
     df = df.copy()
 
     print("=== prepare_base_dataframe BEFORE ===")
