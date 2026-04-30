@@ -56,34 +56,40 @@ def get_price(ticker, cost_price, fallback_price=None):
 
     return cost_price, True
 
-def get_dividends(ticker):
+def get_dividends(tickers):
+    dividend_dict = {}
+    div_errors = []
 
-    if ticker in ["CASH", "VOO"]:
-        return 0.0, False
+    for ticker in tickers:
 
-    max_retry = 3
+        if ticker in ["CASH", "VOO"]:
+            dividend_dict[ticker] = 0.0
+            continue
 
-    for attempt in range(max_retry):
-        try:
-            stock = yf.Ticker(ticker)
-            div_yield = stock.info.get('dividendYield', 0)
+        max_retry = 3
 
-            if div_yield is None:
-                div_yield = 0.0
+        for attempt in range(max_retry):
+            try:
+                stock = yf.Ticker(ticker)
+                div_yield = stock.info.get("dividendYield", 0)
 
-            if div_yield > 0.2:
-                div_yield = div_yield / 100
+                if div_yield is None:
+                    div_yield = 0.0
 
-            return div_yield, False
+                if div_yield > 0.2:
+                    div_yield = div_yield / 100
 
-        except Exception as e:
-            print(f"{ticker} 配当エラー: {e}")
+                dividend_dict[ticker] = div_yield
+                break
 
-        if attempt < max_retry - 1:
-            time.sleep(5)
+            except Exception as e:
+                if attempt < max_retry - 1:
+                    time.sleep(5)
+                else:
+                    dividend_dict[ticker] = 0.0
+                    div_errors.append(ticker)
 
-    return 0.0, True
-
+    return dividend_dict, div_errors
 def get_performance(ticker):
 
     if ticker == "CASH":
