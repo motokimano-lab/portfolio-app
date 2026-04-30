@@ -173,8 +173,15 @@ if perf_errors:
 else:
     st.sidebar.success("前日比データ取得：正常")
 
-if usd_error or vnd_error:
-    st.sidebar.warning("為替取得失敗あり")
+fx_errors = []
+
+if usd_error:
+    fx_errors.append("USD/JPY")
+if vnd_error:
+    fx_errors.append("VND/JPY")
+
+if fx_errors:
+    st.sidebar.warning(f"為替取得失敗: {', '.join(fx_errors)}")
 else:
     st.sidebar.success("為替データ取得：正常")
 
