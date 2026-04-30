@@ -82,7 +82,7 @@ def clean_tickers(tickers):
                 cleaned.append(t)
     return list(set(cleaned))
 
-↓↓一旦get_priceを復活↓↓
+#一旦get_priceを復活
 
 def get_price(ticker, fallback_price):
     try:
