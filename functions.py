@@ -21,40 +21,29 @@ def get_fx(symbol, default):
 
 import time
 
-def get_price(ticker, cost_price, fallback_price=None):
-    if ticker == "CASH":
-        return 1, False
+def get_prices_bulk(tickers):
+    try:
+        df = yf.download(
+            tickers=tickers,
+            period="1d",
+            group_by="ticker",
+            threads=True
+        )
 
-    max_retry = 3
+        price_dict = {}
 
-    for attempt in range(max_retry):
-        try:
-            print(f"{ticker} 価格取得（{attempt+1}/{max_retry}回目）")
+        for t in tickers:
+            try:
+                price = df[t]["Close"].iloc[-1]
+                price_dict[t] = price
+            except:
+                price_dict[t] = None
 
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="5d")
+        return price_dict
 
-            closes = hist["Close"].dropna()
-
-            if not closes.empty:
-                price = closes.iloc[-1]
-                print(f"{ticker} 成功: {price}")
-                return price, False
-
-            print(f"{ticker} Closeが空")
-
-        except Exception as e:
-            print(f"{ticker} エラー: {e}")
-
-        if attempt < max_retry - 1:
-            time.sleep(10)
-
-    print(f"{ticker} 全リトライ失敗")
-
-    if fallback_price is not None:
-        return fallback_price, True
-
-    return cost_price, True
+    except Exception as e:
+        print("bulk取得エラー:", e)
+        return {t: None for t in tickers}
 
 def get_dividends(tickers):
     dividend_dict = {}
