@@ -94,6 +94,14 @@ vnd_jpy, vnd_error = get_fx("VNDJPY=X", 0.006)
 
 # ========= 3. メイン計算処理 (すべて先に終わらせる) =========
 # 基本数値
+df["ticker"] = df["ticker"].astype(str).str.strip()
+
+# 数字だけとかゴミを除外
+df = df[df["ticker"].str.match(r"^[A-Z0-9\.\-]+$")]
+
+# CASHは除外
+df = df[df["ticker"] != "CASH"]
+
 unique_tickers = df["ticker"].drop_duplicates()[:30]#テスト用（後で消す）
 #本来のコード unique_tickers = df["ticker"].unique()
 
@@ -138,11 +146,11 @@ df["profit_pct"] = df.apply(lambda r: 0 if r["ticker"] == "CASH" else (r["price"
 performance_dict, perf_errors = get_performance(unique_tickers)
 
 df["daily_pct"] = df["ticker"].map(
-    lambda x: performance_dict[x][0]
+    lambda x: performance_dict.get(x, [0, 0])[0]
 )
 
 df["ytd_pct"] = df["ticker"].map(
-    lambda x: performance_dict[x][1]
+    lambda x: performance_dict.get(x, [0, 0])[1]
 )
 
 # ========= 4. フィルター設定 (サイドバー) =========
