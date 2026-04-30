@@ -54,7 +54,69 @@ def get_price(ticker, cost_price, fallback_price=None):
         return fallback_price, True
 
     return cost_price, True
-    
+
+def get_dividend_data(ticker):
+
+    if ticker in ["CASH", "VOO"]:
+        return 0.0, False
+
+    max_retry = 3
+
+    for attempt in range(max_retry):
+        try:
+            stock = yf.Ticker(ticker)
+            div_yield = stock.info.get('dividendYield', 0)
+
+            if div_yield is None:
+                div_yield = 0.0
+
+            if div_yield > 0.2:
+                div_yield = div_yield / 100
+
+            return div_yield, False
+
+        except Exception as e:
+            print(f"{ticker} 配当エラー: {e}")
+
+        if attempt < max_retry - 1:
+            time.sleep(5)
+
+    return 0.0, True
+
+def get_performance(ticker):
+
+    if ticker == "CASH":
+        return (0.0, 0.0), False
+
+    max_retry = 3
+
+    for attempt in range(max_retry):
+        try:
+            stock = yf.Ticker(ticker)
+
+            hist = stock.history(period="2d")
+
+            if len(hist) >= 2:
+                daily = (
+                    (hist["Close"].iloc[-1] - hist["Close"].iloc[-2])
+                    / hist["Close"].iloc[-2] * 100
+                )
+            else:
+                daily = 0.0
+
+            ytd = stock.info.get("ytdReturn", 0)
+            ytd = ytd * 100 if ytd else 0.0
+
+            return (daily, ytd), False
+
+        except Exception as e:
+            print(f"{ticker} パフォーマンスエラー: {e}")
+
+        if attempt < max_retry - 1:
+            time.sleep(5)
+
+    return (0.0, 0.0), True
+
 def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
     df = df.copy()
 
