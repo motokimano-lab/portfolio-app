@@ -15,6 +15,7 @@ from functions import (
     save_daily_log_detail,
     get_dividends,
     get_performance,
+    clean_tickers
 )
 import functions
 print(dir(functions))
@@ -107,31 +108,16 @@ df = df[df["ticker"] != "CASH"]
 unique_tickers = clean_tickers(df["ticker"].unique())
 #本来のコード unique_tickers = df["ticker"].unique()
 
-price_dict = {}
+price_dict = get_prices_bulk(unique_tickers)
+
 warning_tickers = []
 
-for ticker in unique_tickers:
-    if ticker == "CASH":
-        price_dict[ticker] = 1
-    else:
-        fallback_price = df.loc[
-            df["ticker"] == ticker,
-            "cost_price"
-        ].iloc[0]
-
-        # get_price() から
-        # (price, fallback_used)
-        # を受け取る
-        price, used_fallback = get_price(
-            ticker,
-            fallback_price
-        )
-
-        price_dict[ticker] = price
-
-        if used_fallback:
-            warning_tickers.append(ticker)
-
+for t in unique_tickers:
+    if price_dict.get(t) is None:
+        fallback = df.loc[df["ticker"] == t, "cost_price"].iloc[0]
+        price_dict[t] = fallback
+        warning_tickers.append(t)
+        
 df["price"] = df["ticker"].map(lambda x: price_dict.get(x))
 
 df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
@@ -172,11 +158,7 @@ if warning_tickers:
 else:
     st.sidebar.success("価格データ取得：正常")
 
-div_warning_tickers = []
-
-for ticker in unique_tickers:
-    div = get_dividends(ticker)
-    dividend_dict[ticker] = div
+dividend_dict, div_errors = get_dividends(unique_tickers)
 
     if div == 0 and ticker not in ["CASH", "VOO", "BTC-JPY", "ETH-JPY"]:
         div_warning_tickers.append(ticker)
