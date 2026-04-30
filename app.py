@@ -10,13 +10,9 @@ import os
 import json
 from functions import ( 
     get_fx,
-    get_price,
     prepare_base_dataframe,
     save_daily_log_detail,
-    get_dividends,
-    get_performance,
-    clean_tickers,
-    get_prices_bulk
+    get_assets_data_bulk
 )
 import functions
 print(dir(functions))
@@ -96,35 +92,33 @@ vnd_jpy, vnd_error = get_fx("VNDJPY=X", 0.006)
 
 # ========= 3. メイン計算処理 =========
 df["ticker"] = df["ticker"].astype(str).str.strip()
+all_tickers = df["ticker"].unique()
 
-# ティッカー一覧を取得（CASH以外をyfinanceに投げる用）
-tickers_for_yf = clean_tickers(df[df["ticker"] != "CASH"]["ticker"].unique())
-price_dict = get_prices_bulk(tickers_for_yf)
+# 一括取得関数を1回だけ呼ぶ
+price_dict, div_yield_dict, perf_dict, errors = get_assets_data_bulk(all_tickers)
 
-# 【ここが重要】すべてのティッカー（CASH含む）のリストを作成
-unique_tickers = df["ticker"].unique() 
-warning_tickers = []
+# 現金データの定義
+price_dict["CASH"] = 1.0
+div_yield_dict["CASH"] = 0.0
+perf_dict["CASH"] = (0.0, 0.0)
 
-for t in unique_tickers:
-    if t == "CASH":
-        price_dict[t] = 1.0
-    elif price_dict.get(t) is None:
-        # 価格取得失敗時のフォールバック
-        fallback = df.loc[df["ticker"] == t, "cost_price"].iloc[0]
-        price_dict[t] = fallback
-        warning_tickers.append(t)
-
+# 各列へのマッピング
 df["price"] = df["ticker"].map(lambda x: price_dict.get(x))
+df["div_yield"] = df["ticker"].map(lambda x: div_yield_dict.get(x, 0.0))
+df["day_diff_val"] = df["ticker"].map(lambda x: perf_dict.get(x, (0.0, 0.0))[0])
+df["day_diff_pct"] = df["ticker"].map(lambda x: perf_dict.get(x, (0.0, 0.0))[1])
 
+# 基本データの計算（為替反映、value_jpyの作成など）
+df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
+
+# 年間配当金の計算 (評価額 * 過去1年実績の利回り)
+df["annual_div_jpy"] = df["value_jpy"] * df["div_yield"]
 # 評価額の計算
 df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
 # --- 配当計算（123行目付近） ---
 # unique_tickers が上で定義されているので、これで動きます
 dividend_dict, div_errors = get_dividends(unique_tickers)
-
-df["div_yield"] = df["ticker"].map(dividend_dict)
-df["annual_div_jpy"] = df["value_jpy"] * df["div_yield"]
 df["after_tax_div_jpy"] = df.apply(calc_after_tax_dividend, axis=1)
 
 # 損益・パフォーマンス
