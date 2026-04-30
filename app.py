@@ -97,17 +97,17 @@ vnd_jpy, vnd_error = get_fx("VNDJPY=X", 0.006)
 # ========= 3. メイン計算処理 =========
 df["ticker"] = df["ticker"].astype(str).str.strip()
 
-# ティッカー一覧を取得（CASH以外をyfinanceに投げる）
+# ティッカー一覧を取得（CASH以外をyfinanceに投げる用）
 tickers_for_yf = clean_tickers(df[df["ticker"] != "CASH"]["ticker"].unique())
 price_dict = get_prices_bulk(tickers_for_yf)
 
-# CASHの価格を1.0に固定し、取得失敗した銘柄の補完を行う
-unique_tickers_all = df["ticker"].unique()
+# 【ここが重要】すべてのティッカー（CASH含む）のリストを作成
+unique_tickers = df["ticker"].unique() 
 warning_tickers = []
 
-for t in unique_tickers_all:
+for t in unique_tickers:
     if t == "CASH":
-        price_dict[t] = 1.0  # 現金は1単価1円（または1ドル）として扱う
+        price_dict[t] = 1.0
     elif price_dict.get(t) is None:
         # 価格取得失敗時のフォールバック
         fallback = df.loc[df["ticker"] == t, "cost_price"].iloc[0]
@@ -116,10 +116,11 @@ for t in unique_tickers_all:
 
 df["price"] = df["ticker"].map(lambda x: price_dict.get(x))
 
-# この後の prepare_base_dataframe 内で quantity(数量) * price(1.0) * 為替 が計算されます
+# 評価額の計算
 df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
-# 配当計算
+# --- 配当計算（123行目付近） ---
+# unique_tickers が上で定義されているので、これで動きます
 dividend_dict, div_errors = get_dividends(unique_tickers)
 
 df["div_yield"] = df["ticker"].map(dividend_dict)
