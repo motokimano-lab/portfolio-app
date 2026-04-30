@@ -73,3 +73,18 @@ def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
     df["sector_group"] = df["sector"].fillna("未分類")
 
     return df
+
+↓↓一旦get_priceを復活↓↓
+
+def get_price(ticker, fallback_price):
+    try:
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="1d")
+
+        if not hist.empty:
+            return hist["Close"].iloc[-1], False
+        else:
+            return fallback_price, True
+
+    except:
+        return fallback_price, True
