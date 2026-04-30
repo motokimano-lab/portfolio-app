@@ -158,7 +158,10 @@ if warning_tickers:
 else:
     st.sidebar.success("価格データ取得：正常")
 
-dividend_dict, div_errors = get_dividends(unique_tickers)
+div_warning_tickers = []
+
+for ticker in unique_tickers:
+    div = dividend_dict.get(ticker, 0)
 
     if div == 0 and ticker not in ["CASH", "VOO", "BTC-JPY", "ETH-JPY"]:
         div_warning_tickers.append(ticker)
