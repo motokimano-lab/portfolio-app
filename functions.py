@@ -5,10 +5,12 @@ import yfinance as yf
 def get_fx(symbol, default):
     try:
         df = yf.download(symbol, period="1d", progress=False)
-        return df["Close"].iloc[-1], False
+        price = df["Close"].iloc[-1]
+        # ←ここが重要
+        price = float(price)
+        return price, False
     except:
-        return default, True
-
+        return float(default), True
 
 # --- 価格（これだけ使う） ---
 def get_prices_bulk(tickers):
