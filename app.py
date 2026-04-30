@@ -144,9 +144,12 @@ else:
 
 div_warning_tickers = []
 
-for ticker in unique_tickers:
-    div = dividend_dict.get(ticker, 0)
-
+# 修正後のループ処理
+for ticker in all_tickers: # unique_tickers から all_tickers に変更
+    # div_yield_dict から値を取得（なければ 0）
+    div = div_yield_dict.get(ticker, 0)
+    
+    # 既存のロジック（配当がない場合の警告リスト作成など）
     if div == 0 and ticker not in ["CASH", "VOO", "BTC-JPY", "ETH-JPY"]:
         div_warning_tickers.append(ticker)
 
