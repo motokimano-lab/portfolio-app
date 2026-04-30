@@ -97,9 +97,9 @@ try:
 
         return price_dict, div_yield_dict, perf_dict, errors
 
-    except Exception as e:
+except Exception as e:
         # 通信エラーなどの致命的な失敗時
-        return {}, {}, {}, yf_tickers
+    return {}, {}, {}, yf_tickers
 # --- DataFrame整形 ---
 def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
     df = df.copy()
