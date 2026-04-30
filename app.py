@@ -163,8 +163,13 @@ if div_warning_tickers:
 else:
     st.sidebar.success("✅ 配当データ取得：正常")
 
-if perf_errors:
-    st.sidebar.warning(f"前日比取得失敗: {', '.join(perf_errors)}")
+# --- パフォーマンス取得のエラー表示 ---
+# 既に上で errors を使って st.sidebar.error を出しているなら、この if ブロックは丸ごと削除してOKです。
+# もし残したい場合は以下のように書き換えます。
+
+if errors:
+    # 既存の errors を使う（perf_errors という名前はもう使いません）
+    st.sidebar.warning(f"⚠️ 一部銘柄の騰落データが不完全です: {', '.join(errors)}")
 else:
     st.sidebar.success("前日比データ取得：正常")
 
