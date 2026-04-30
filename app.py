@@ -155,7 +155,7 @@ else:
 div_warning_tickers = []
 
 for ticker in unique_tickers:
-    div = get_dividend_data(ticker)
+    div = get_dividends(ticker)
     dividend_dict[ticker] = div
 
     if div == 0 and ticker not in ["CASH", "VOO", "BTC-JPY", "ETH-JPY"]:
@@ -184,7 +184,7 @@ st.sidebar.header("🔄 データ更新")
 
 if st.sidebar.button("最新データを再取得"):
     get_performance.clear()
-    get_dividend_data.clear()
+    get_dividends.clear()
     
     load_daily_log_detail.clear()
 
