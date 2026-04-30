@@ -90,39 +90,49 @@ def get_dividends(tickers):
                     div_errors.append(ticker)
 
     return dividend_dict, div_errors
-def get_performance(ticker):
+import time
 
-    if ticker == "CASH":
-        return (0.0, 0.0), False
+def get_performance(tickers):
+    performance_dict = {}
+    perf_errors = []
 
-    max_retry = 3
+    for ticker in tickers:
 
-    for attempt in range(max_retry):
-        try:
-            stock = yf.Ticker(ticker)
+        if ticker == "CASH":
+            performance_dict[ticker] = (0.0, 0.0)
+            continue
 
-            hist = stock.history(period="2d")
+        max_retry = 3
 
-            if len(hist) >= 2:
-                daily = (
-                    (hist["Close"].iloc[-1] - hist["Close"].iloc[-2])
-                    / hist["Close"].iloc[-2] * 100
-                )
-            else:
-                daily = 0.0
+        for attempt in range(max_retry):
+            try:
+                stock = yf.Ticker(ticker)
 
-            ytd = stock.info.get("ytdReturn", 0)
-            ytd = ytd * 100 if ytd else 0.0
+                hist = stock.history(period="2d")
 
-            return (daily, ytd), False
+                if len(hist) >= 2:
+                    daily_pct = (
+                        (hist["Close"].iloc[-1] - hist["Close"].iloc[-2])
+                        / hist["Close"].iloc[-2] * 100
+                    )
+                else:
+                    daily_pct = 0.0
 
-        except Exception as e:
-            print(f"{ticker} パフォーマンスエラー: {e}")
+                ytd = stock.info.get("ytdReturn", 0)
+                ytd_pct = ytd * 100 if ytd else 0.0
 
-        if attempt < max_retry - 1:
-            time.sleep(5)
+                performance_dict[ticker] = (daily_pct, ytd_pct)
+                break
 
-    return (0.0, 0.0), True
+            except Exception as e:
+                if attempt < max_retry - 1:
+                    time.sleep(5)
+                else:
+                    performance_dict[ticker] = (0.0, 0.0)
+                    perf_errors.append(ticker)
+
+    return performance_dict, perf_errors
+
 
 def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
     df = df.copy()
