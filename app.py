@@ -196,8 +196,8 @@ else:
 st.sidebar.header("🔄 データ更新")
 
 if st.sidebar.button("最新データを再取得"):
-    get_performance.clear()
-    get_dividends.clear()
+    #キャッシュなしなのでget_performance.clear()
+    #キャッシュなしなのでget_dividends.clear()
     
     load_daily_log_detail.clear()
 
