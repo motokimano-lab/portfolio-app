@@ -99,8 +99,8 @@ def load_daily_log_detail():
     return df_log
 
 # 為替取得
-usd_jpy = get_fx("JPY=X", 150)
-vnd_jpy = get_fx("VNDJPY=X", 0.006)
+usd_jpy, usd_error = get_fx("JPY=X", 150)
+vnd_jpy, vnd_error = get_fx("VNDJPY=X", 0.006)
 
 
 
@@ -139,9 +139,14 @@ df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
 # 配当計算
 dividend_dict = {}
+div_errors = []
 
 for ticker in unique_tickers:
-    dividend_dict[ticker] = get_dividend_data(ticker)
+    div, is_error = get_dividend_data(ticker)
+    dividend_dict[ticker] = div
+
+    if is_error:
+        div_errors.append(ticker)
 
 df["div_yield"] = df["ticker"].map(dividend_dict)
 df["annual_div_jpy"] = df["value_jpy"] * df["div_yield"]
@@ -150,9 +155,14 @@ df["after_tax_div_jpy"] = df.apply(calc_after_tax_dividend, axis=1)
 # 損益・パフォーマンス
 df["profit_pct"] = df.apply(lambda r: 0 if r["ticker"] == "CASH" else (r["price"] - r["cost_price"]) / r["cost_price"] * 100, axis=1)
 performance_dict = {}
+perf_errors = []
 
 for ticker in unique_tickers:
-    performance_dict[ticker] = get_performance(ticker)
+    perf, is_error = get_performance(ticker)
+    performance_dict[ticker] = perf
+
+    if is_error:
+        perf_errors.append(ticker)
 
 df["daily_pct"] = df["ticker"].map(
     lambda x: performance_dict[x][0]
@@ -188,12 +198,22 @@ for ticker in unique_tickers:
     if div == 0 and ticker not in ["CASH", "VOO", "BTC-JPY", "ETH-JPY"]:
         div_warning_tickers.append(ticker)
 
-if div_warning_tickers:
-    st.sidebar.warning(
-        f"配当取得要確認: {', '.join(div_warning_tickers)}"
-    )
+if div_errors:
+    st.sidebar.error(f"❌ 配当取得失敗: {', '.join(div_errors)}")
+elif div_warning_tickers:
+    st.sidebar.warning(f"⚠️ 配当要確認: {', '.join(div_warning_tickers)}")
 else:
-    st.sidebar.success("配当データ取得：正常")
+    st.sidebar.success("✅ 配当データ取得：正常")
+
+if perf_errors:
+    st.sidebar.warning(f"前日比取得失敗: {', '.join(perf_errors)}")
+else:
+    st.sidebar.success("前日比データ取得：正常")
+
+if usd_error or vnd_error:
+    st.sidebar.warning("為替取得失敗あり")
+else:
+    st.sidebar.success("為替データ取得：正常")
 
 
 # ========= キャッシュ更新 =========
