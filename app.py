@@ -116,9 +116,7 @@ df["annual_div_jpy"] = df["value_jpy"] * df["div_yield"]
 # 評価額の計算
 df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
-# --- 配当計算（123行目付近） ---
-# unique_tickers が上で定義されているので、これで動きます
-dividend_dict, div_errors = get_dividends(unique_tickers)
+# --- 配当計算---
 df["after_tax_div_jpy"] = df.apply(calc_after_tax_dividend, axis=1)
 
 # 損益・パフォーマンス
