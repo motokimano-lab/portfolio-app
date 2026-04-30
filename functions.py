@@ -45,6 +45,14 @@ def get_prices_bulk(tickers):
         print("bulk取得エラー:", e)
         return {t: None for t in tickers}
 
+def clean_tickers(tickers):
+    cleaned = []
+    for t in tickers:
+        if isinstance(t, str) and len(t) > 0:
+            if not t.isdigit():  # "1","2"除外
+                cleaned.append(t)
+    return list(set(cleaned))
+
 def get_dividends(tickers):
     dividend_dict = {}
     div_errors = []
