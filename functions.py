@@ -47,7 +47,7 @@ def get_price(ticker, cost_price, fallback_price=None):
             print(f"{ticker} エラー: {e}")
 
         if attempt < max_retry - 1:
-            time.sleep(5)
+            time.sleep(10)
 
     print(f"{ticker} 全リトライ失敗")
 
@@ -84,7 +84,7 @@ def get_dividends(tickers):
 
             except Exception as e:
                 if attempt < max_retry - 1:
-                    time.sleep(5)
+                    time.sleep(10)
                 else:
                     dividend_dict[ticker] = 0.0
                     div_errors.append(ticker)
@@ -126,7 +126,7 @@ def get_performance(tickers):
 
             except Exception as e:
                 if attempt < max_retry - 1:
-                    time.sleep(5)
+                    time.sleep(10)
                 else:
                     performance_dict[ticker] = (0.0, 0.0)
                     perf_errors.append(ticker)
