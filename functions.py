@@ -13,9 +13,10 @@ from oauth2client.service_account import ServiceAccountCredentials
 def get_fx(symbol, default):
     try:
         fx = yf.Ticker(symbol)
-        return fx.history(period="1d")["Close"].iloc[-1]
+        price = fx.history(period="1d")["Close"].iloc[-1]
+        return price, False
     except:
-        return default
+        return default, True
 
 
 import time
