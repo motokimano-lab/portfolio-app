@@ -13,41 +13,61 @@ def get_fx(symbol, default):
         return float(default), True
 
 # --- 価格（これだけ使う） ---
-def get_prices_bulk(tickers):
+def get_assets_data_bulk(tickers):
+    """
+    一括で価格、過去1年間の配当合計、前日差を取得する
+    """
     if not tickers:
-        return {}
+        return {}, {}, {}, []
+
+    yf_tickers = [t for t in tickers if t != "CASH"]
+    if not yf_tickers:
+        return {}, {}, {}, []
+
     try:
-        # 期間を1dから5dに延ばすと、休日明けでもデータが取りやすくなります
-        data = yf.download(tickers, period="5d", group_by='ticker', progress=False)
+        # 過去1年分のデータを取得 (actions=Trueで配当履歴を含む)
+        data = yf.download(yf_tickers, period="1y", actions=True, group_by='ticker', progress=False)
         
         price_dict = {}
-        for t in tickers:
+        div_yield_dict = {}
+        perf_dict = {}
+        errors = []
+
+        for t in yf_tickers:
             try:
-                if len(tickers) == 1:
-                    # 1件のみの場合、列名が直接 "Close" になることがある
-                    temp_df = data
-                else:
-                    temp_df = data[t]
+                df_t = data if len(yf_tickers) == 1 else data[t]
+                df_t = df_t.dropna(subset=["Close"])
                 
-                # 直近の有効な（NaNでない）終値を取得
-                last_price = temp_df["Close"].dropna().iloc[-1]
-                price_dict[t] = float(last_price)
-            except:
-                price_dict[t] = None
-        return price_dict
+                if df_t.empty:
+                    continue
+
+                # 1. 現在価格
+                current_price = float(df_t["Close"].iloc[-1])
+                price_dict[t] = current_price
+
+                # 2. 前日差 (最新行とその前の行)
+                if len(df_t) >= 2:
+                    prev_price = float(df_t["Close"].iloc[-2])
+                    diff_val = current_price - prev_price
+                    diff_pct = (diff_val / prev_price) * 100
+                    perf_dict[t] = (diff_val, diff_pct)
+                else:
+                    perf_dict[t] = (0.0, 0.0)
+
+                # 3. 過去1年間の配当利回り
+                # 過去1年間の配当実績(Dividends列)をすべて合計
+                annual_div_total = df_t["Dividends"].sum()
+                div_yield_dict[t] = annual_div_total / current_price if current_price > 0 else 0.0
+
+            except Exception:
+                errors.append(t)
+                continue
+
+        return price_dict, div_yield_dict, perf_dict, errors
+
     except Exception as e:
-        print(f"Bulk fetch error: {e}")
-        return {t: None for t in tickers}
-
-# --- 配当（ダミー） ---
-def get_dividends(tickers):
-    return {t: 0.0 for t in tickers}, []
-
-
-# --- パフォーマンス（ダミー） ---
-def get_performance(tickers):
-    return {t: (0.0, 0.0) for t in tickers}, []
-
+        print(f"Bulk download error: {e}")
+        return {}, {}, {}, yf_tickers
 
 # --- DataFrame整形 ---
 def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
