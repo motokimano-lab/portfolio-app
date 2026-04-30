@@ -118,10 +118,6 @@ df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
 # 配当計算
 dividend_dict, div_errors = get_dividends(unique_tickers)
-dividend_dict[ticker] = div
-
-    if is_error:
-        div_errors.append(ticker)
 
 df["div_yield"] = df["ticker"].map(dividend_dict)
 df["annual_div_jpy"] = df["value_jpy"] * df["div_yield"]
