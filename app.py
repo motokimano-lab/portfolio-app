@@ -23,6 +23,15 @@ print(dir(functions))
 url = "https://docs.google.com/spreadsheets/d/18PLN9uJHxVZCAvAw92piWCniLlQ2i8Z6dT8ok_jycBI/export?format=csv&gid=0"
 df = pd.read_csv(url)
 
+df["ticker"] = df["ticker"].astype(str).str.strip()
+
+# 明らかにおかしいticker除外
+df = df[df["ticker"].notna()]
+df = df[df["ticker"] != ""]
+df = df[~df["ticker"].str.isnumeric()]
+
+print("使用ticker一覧:", df["ticker"].unique())
+
 st.set_page_config(layout="wide") # 画面を広く使う設定
 st.title("My Portfolio Management")
 
@@ -85,7 +94,8 @@ vnd_jpy, vnd_error = get_fx("VNDJPY=X", 0.006)
 
 # ========= 3. メイン計算処理 (すべて先に終わらせる) =========
 # 基本数値
-unique_tickers = df["ticker"].unique()
+unique_tickers = df["ticker"].drop_duplicates()[:30]#テスト用（後で消す）
+#本来のコード unique_tickers = df["ticker"].unique()
 
 price_dict = {}
 warning_tickers = []
