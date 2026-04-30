@@ -14,6 +14,8 @@ from functions import (
     prepare_base_dataframe,
     save_daily_log_detail,
 )
+import functions
+print(dir(functions))
 
 # ========= 1. データ読み込み =========
 url = "https://docs.google.com/spreadsheets/d/18PLN9uJHxVZCAvAw92piWCniLlQ2i8Z6dT8ok_jycBI/export?format=csv&gid=0"
