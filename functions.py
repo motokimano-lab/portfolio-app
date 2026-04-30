@@ -17,21 +17,19 @@ def get_assets_data_bulk(tickers):
     if not tickers:
         return {}, {}, {}, []
 
-    # CASHを除外し、かつ重複を排除してリスト化
-    # 判定を緩め、英数字・ドット・ハイフンが含まれていればOKにする
-    yf_tickers = [
-        str(t).strip() for t in set(tickers) 
+    # CASHを除外し、全て「大文字」に変換して重複排除
+    # 180a.t -> 180A.T に統一
+    yf_tickers = list(set([
+        str(t).strip().upper() for t in tickers 
         if t != "CASH" and pd.notna(t)
-    ]
+    ]))
     
     if not yf_tickers:
         return {}, {}, {}, []
 
     try:
-        # 過去1年分を一括ダウンロード
+        # 取得
         data = yf.download(yf_tickers, period="1y", actions=True, group_by='ticker', progress=False)
-        
-        # ... (以下、前回提示したループ処理を継続) ...
         
         price_dict = {}
         div_yield_dict = {}
@@ -40,29 +38,34 @@ def get_assets_data_bulk(tickers):
 
         for t in yf_tickers:
             try:
-                df_t = data if len(yf_tickers) == 1 else data[t]
+                # data[t] または data で参照（1件取得時と複数取得時で構造が違う対策）
+                df_t = data[t] if len(yf_tickers) > 1 else data
                 df_t = df_t.dropna(subset=["Close"])
                 
                 if df_t.empty:
+                    errors.append(t)
                     continue
 
-                # 1. 現在価格
+                # 現在価格
                 current_price = float(df_t["Close"].iloc[-1])
                 price_dict[t] = current_price
+                # map用に、入力された小文字バージョンも辞書に入れておく（念のため）
+                price_dict[t.lower()] = current_price
 
-                # 2. 前日差 (最新行とその前の行)
+                # 前日差
                 if len(df_t) >= 2:
                     prev_price = float(df_t["Close"].iloc[-2])
                     diff_val = current_price - prev_price
                     diff_pct = (diff_val / prev_price) * 100
                     perf_dict[t] = (diff_val, diff_pct)
+                    perf_dict[t.lower()] = (diff_val, diff_pct)
                 else:
                     perf_dict[t] = (0.0, 0.0)
 
-                # 3. 過去1年間の配当利回り
-                # 過去1年間の配当実績(Dividends列)をすべて合計
-                annual_div_total = df_t["Dividends"].sum()
+                # 過去1年間の配当
+                annual_div_total = df_t["Dividends"].sum() if "Dividends" in df_t.columns else 0
                 div_yield_dict[t] = annual_div_total / current_price if current_price > 0 else 0.0
+                div_yield_dict[t.lower()] = div_yield_dict[t]
 
             except Exception:
                 errors.append(t)
@@ -71,9 +74,7 @@ def get_assets_data_bulk(tickers):
         return price_dict, div_yield_dict, perf_dict, errors
 
     except Exception as e:
-        print(f"Bulk download error: {e}")
         return {}, {}, {}, yf_tickers
-
 # --- DataFrame整形 ---
 def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
     df = df.copy()
