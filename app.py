@@ -15,7 +15,8 @@ from functions import (
     save_daily_log_detail,
     get_dividends,
     get_performance,
-    clean_tickers
+    clean_tickers,
+    get_prices_bulk
 )
 import functions
 print(dir(functions))
