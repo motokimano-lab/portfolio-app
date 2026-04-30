@@ -137,10 +137,8 @@ selected_accounts = st.sidebar.multiselect("口座種別を選択", all_accounts
 
 st.sidebar.header("📡 データ取得状態")
 
-if warning_tickers:
-    st.sidebar.warning(
-        f"価格取得失敗: {', '.join(warning_tickers)}"
-    )
+if errors:
+    st.warning(f"データ取得失敗（直近の終値や配当が取得できませんでした）: {errors}")
 else:
     st.sidebar.success("価格データ取得：正常")
 
