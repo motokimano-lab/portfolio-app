@@ -55,7 +55,7 @@ def get_price(ticker, cost_price, fallback_price=None):
 
     return cost_price, True
 
-def get_dividend(ticker):
+def get_dividends(ticker):
 
     if ticker in ["CASH", "VOO"]:
         return 0.0, False
