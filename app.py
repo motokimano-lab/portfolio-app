@@ -8,11 +8,13 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import os
 import json
-from functions import (
+from functions import ( 
     get_fx,
     get_price,
     prepare_base_dataframe,
     save_daily_log_detail,
+    get_dividends,
+    get_performance,
 )
 import functions
 print(dir(functions))
@@ -29,29 +31,6 @@ st.title("My Portfolio Management")
 import time
 
 
-@st.cache_data(ttl=3600)
-def get_dividend_data(ticker):
-    exclude_tickers = ["CASH", "VOO"]
-    if ticker in exclude_tickers: return 0.0
-    try:
-        stock = yf.Ticker(ticker)
-        div_yield = stock.info.get('dividendYield', 0)
-        if div_yield is None: return 0.0
-        if div_yield > 0.2: div_yield = div_yield / 100
-        return div_yield
-    except: return 0.0
-
-@st.cache_data(ttl=3600)
-def get_performance(ticker):
-    if ticker == "CASH": return 0.0, 0.0
-    try:
-        stock = yf.Ticker(ticker)
-        hist_daily = stock.history(period="2d")
-        daily_pct = ((hist_daily["Close"].iloc[-1] - hist_daily["Close"].iloc[-2]) / hist_daily["Close"].iloc[-2] * 100) if len(hist_daily) >= 2 else 0.0
-        ytd_pct = stock.info.get('ytdReturn', 0)
-        ytd_pct = (ytd_pct * 100) if ytd_pct is not None else 0.0
-        return daily_pct, ytd_pct
-    except: return 0.0, 0.0
 
 def calc_after_tax_dividend(row):
     annual_div_jpy = row["annual_div_jpy"]
@@ -138,12 +117,8 @@ df["price"] = df["ticker"].map(price_dict)
 df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
 # 配当計算
-dividend_dict = {}
-div_errors = []
-
-for ticker in unique_tickers:
-    div, is_error = get_dividend_data(ticker)
-    dividend_dict[ticker] = div
+dividend_dict, div_errors = get_dividends(unique_tickers)
+dividend_dict[ticker] = div
 
     if is_error:
         div_errors.append(ticker)
@@ -154,12 +129,8 @@ df["after_tax_div_jpy"] = df.apply(calc_after_tax_dividend, axis=1)
 
 # 損益・パフォーマンス
 df["profit_pct"] = df.apply(lambda r: 0 if r["ticker"] == "CASH" else (r["price"] - r["cost_price"]) / r["cost_price"] * 100, axis=1)
-performance_dict = {}
-perf_errors = []
-
-for ticker in unique_tickers:
-    perf, is_error = get_performance(ticker)
-    performance_dict[ticker] = perf
+performance_dict, perf_errors = get_performance(unique_tickers)
+performance_dict[ticker] = perf
 
     if is_error:
         perf_errors.append(ticker)
