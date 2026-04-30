@@ -14,19 +14,24 @@ def get_fx(symbol, default):
 
 # --- 価格（これだけ使う） ---
 def get_assets_data_bulk(tickers):
-    """
-    一括で価格、過去1年間の配当合計、前日差を取得する
-    """
     if not tickers:
         return {}, {}, {}, []
 
-    yf_tickers = [t for t in tickers if t != "CASH"]
+    # CASHを除外し、かつ重複を排除してリスト化
+    # 判定を緩め、英数字・ドット・ハイフンが含まれていればOKにする
+    yf_tickers = [
+        str(t).strip() for t in set(tickers) 
+        if t != "CASH" and pd.notna(t)
+    ]
+    
     if not yf_tickers:
         return {}, {}, {}, []
 
     try:
-        # 過去1年分のデータを取得 (actions=Trueで配当履歴を含む)
+        # 過去1年分を一括ダウンロード
         data = yf.download(yf_tickers, period="1y", actions=True, group_by='ticker', progress=False)
+        
+        # ... (以下、前回提示したループ処理を継続) ...
         
         price_dict = {}
         div_yield_dict = {}
