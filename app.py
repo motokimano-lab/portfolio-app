@@ -126,10 +126,6 @@ df["after_tax_div_jpy"] = df.apply(calc_after_tax_dividend, axis=1)
 # 損益・パフォーマンス
 df["profit_pct"] = df.apply(lambda r: 0 if r["ticker"] == "CASH" else (r["price"] - r["cost_price"]) / r["cost_price"] * 100, axis=1)
 performance_dict, perf_errors = get_performance(unique_tickers)
-performance_dict[ticker] = perf
-
-    if is_error:
-        perf_errors.append(ticker)
 
 df["daily_pct"] = df["ticker"].map(
     lambda x: performance_dict[x][0]
