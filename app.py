@@ -5,7 +5,6 @@ import plotly.express as px
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 import os
 import json
 from functions import ( 
