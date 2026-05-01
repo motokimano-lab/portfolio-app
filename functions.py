@@ -4,6 +4,8 @@ import os
 import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # --- 為替 ---
 def get_fx(symbol, default):
