@@ -3,6 +3,8 @@ import yfinance as yf
 import os
 import json
 
+from oauth2client.service_account import ServiceAccountCredentials
+
 # --- 為替 ---
 def get_fx(symbol, default):
     try:
