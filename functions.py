@@ -150,13 +150,13 @@ def save_daily_log_detail(df):
         "https://www.googleapis.com/auth/drive"
     ]
 
-    if "GCP_SERVICE_ACCOUNT" in os.environ:
+    if "GCP_SERVICE_ACCOUNT" in :
         creds_dict = json.loads(
-            os.environ["GCP_SERVICE_ACCOUNT"]
+            ["GCP_SERVICE_ACCOUNT"]
         )
     else:
         creds_dict = dict(
-            st.secrets["gcp_service_account"]
+            ["gcp_service_account"]
         )
 
     creds = ServiceAccountCredentials.from_json_keyfile_dict(
