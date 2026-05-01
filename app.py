@@ -185,7 +185,7 @@ if price_errors:
 if div_warning_tickers:
     st.sidebar.warning(f"⚠️ 配当要確認: {', '.join(div_warning_tickers)}")
 else:
-    st.sidebar.success("✅ 配当データ取得：正常")
+    st.sidebar.success("配当データ取得：正常")
 
 # --- パフォーマンス取得のエラー表示 ---
 # 既に上で errors を使って st.sidebar.error を出しているなら、この if ブロックは丸ごと削除してOKです。
