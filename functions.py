@@ -150,15 +150,6 @@ def save_daily_log_detail(df, creds_dict):
         "https://www.googleapis.com/auth/drive"
     ]
 
-    if "GCP_SERVICE_ACCOUNT" in :
-        creds_dict = json.loads(
-            ["GCP_SERVICE_ACCOUNT"]
-        )
-    else:
-        creds_dict = dict(
-            ["gcp_service_account"]
-        )
-
     creds = ServiceAccountCredentials.from_json_keyfile_dict(
         creds_dict, scope
     )
