@@ -703,8 +703,15 @@ st.subheader("📅 データ記録")
 
 if st.button("📅 今日の資産を記録"):
     with st.spinner("保存中..."):
-        result = save_daily_log_detail(df)
 
+        # 👇 ここに追加
+        if "GCP_SERVICE_ACCOUNT" in os.environ:
+            creds_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
+        else:
+            creds_dict = dict(st.secrets["gcp_service_account"])
+
+        # 👇 引数に渡す
+        result = save_daily_log_detail(df, creds_dict)
     load_daily_log_detail.clear()
 
     st.success(result)
