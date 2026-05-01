@@ -29,79 +29,86 @@ def get_assets_data_bulk(tickers):
     if not yf_tickers:
         return {}, {}, {}, []
 
-    try:
-        data = yf.download(yf_tickers, period="1y", group_by='ticker', progress=False)
-        
-        price_dict = {}
-        div_yield_dict = {}
-        perf_dict = {}
-        errors = []
-        for t in yf_tickers:
-            try:
-                if len(yf_tickers) == 1:
-                    df_t = data
-                else:
-                    if t in data.columns.levels[0]:
-                        df_t = data[t]
-                    else:
-                        errors.append(t)
-                        continue
+    price_dict = {}
+    div_yield_dict = {}
+    perf_dict = {}
+    errors = []
 
-        df_t = df_t.dropna(subset=["Close"])
-        
-        if df_t.empty:
-            fallback = yf.Ticker(t).history(period="1mo")
-            if not fallback.empty:
+    try:
+        data = yf.download(
+            yf_tickers,
+            period="1y",
+            actions=True,
+            group_by='ticker',
+            progress=False
+        )
+    except Exception:
+        return {}, {}, {}, yf_tickers
+
+    for t in yf_tickers:
+        try:
+            # --- データ取得 ---
+            if len(yf_tickers) == 1:
+                df_t = data
+            else:
+                if t in data.columns.levels[0]:
+                    df_t = data[t]
+                else:
+                    errors.append(t)
+                    continue
+
+            df_t = df_t.dropna(subset=["Close"])
+
+            # --- fallback ---
+            if df_t.empty:
+                fallback = yf.Ticker(t).history(period="5d")
+                if fallback.empty:
+                    errors.append(t)
+                    continue
+
                 current_price = float(fallback["Close"].iloc[-1])
                 annual_div_total = 0
+
                 if len(fallback) >= 2:
                     prev = float(fallback["Close"].iloc[-2])
-                    perf_dict[t] = (current_price - prev, (current_price - prev) / prev * 100)
+                    perf_dict[t] = (
+                        current_price - prev,
+                        (current_price - prev) / prev * 100
+                    )
                 else:
                     perf_dict[t] = (0.0, 0.0)
+
             else:
-                errors.append(t)
-                continue
+                current_price = float(df_t["Close"].iloc[-1])
+
+                if len(df_t) >= 2:
+                    prev_price = float(df_t["Close"].iloc[-2])
+                    diff_val = current_price - prev_price
+                    diff_pct = (diff_val / prev_price) * 100
+                    perf_dict[t] = (diff_val, diff_pct)
                 else:
-                    current_price = float(df_t["Close"].iloc[-1])
-                    if len(df_t) >= 2:
-                        prev_price = float(df_t["Close"].iloc[-2])
-                        diff_val = current_price - prev_price
-                        diff_pct = (diff_val / prev_price) * 100
-                        perf_dict[t] = (diff_val, diff_pct)
-                    else:
-                        perf_dict[t] = (0.0, 0.0)
+                    perf_dict[t] = (0.0, 0.0)
 
-                    annual_div_total = df_t["Dividends"].sum() if "Dividends" in df_t.columns else 0
+                annual_div_total = (
+                    df_t["Dividends"].sum()
+                    if "Dividends" in df_t.columns else 0
+                )
 
-        for key in [t.upper(), t.lower()]:
-            price_dict[key] = current_price
-            div_yield_dict[key] = annual_div_total / current_price if current_price > 0 else 0.0
-            if t in perf_dict:
-                perf_dict[key] = perf_dict[t]
+            # --- 格納 ---
+            for key in [t.upper(), t.lower()]:
+                price_dict[key] = current_price
+                div_yield_dict[key] = (
+                    annual_div_total / current_price
+                    if current_price > 0 else 0.0
+                )
+                if t in perf_dict:
+                    perf_dict[key] = perf_dict[t]
 
         except Exception:
             errors.append(t)
             continue
 
-
-# 👇👇👇 ここに追加（超重要）👇👇👇
-# fallback rescue（bulkで取りこぼした銘柄の救済）
-        for t in yf_tickers:
-            if t not in price_dict or price_dict[t] is None:
-                try:
-                    fallback = yf.Ticker(t).history(period="1mo")
-                    if not fallback.empty:
-                        current_price = float(fallback["Close"].iloc[-1])
-                        price_dict[t] = current_price
-                except:
-                    errors.append(t)
-
     return price_dict, div_yield_dict, perf_dict, errors
-
-# 👇これが必要！！
-except Exception as e:
-    return {}, {}, {}, yf_tickers
         
 # --- DataFrame整形 ---
 def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
