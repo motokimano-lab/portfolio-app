@@ -26,7 +26,7 @@ def get_assets_data_bulk(tickers):
         return {}, {}, {}, []
 
     try:
-        data = yf.download(yf_tickers, period="1y", actions=True, group_by='ticker', progress=False)
+        data = yf.download(yf_tickers, period="1y", group_by='ticker', progress=False)
         
         price_dict = {}
         div_yield_dict = {}
@@ -47,7 +47,7 @@ def get_assets_data_bulk(tickers):
                 df_t = df_t.dropna(subset=["Close"])
                 
                 if df_t.empty:
-                    fallback = yf.Ticker(t).history(period="5d")
+                    fallback = yf.Ticker(t).history(period="1mo")
                     if not fallback.empty:
                         current_price = float(fallback["Close"].iloc[-1])
                         annual_div_total = 0
