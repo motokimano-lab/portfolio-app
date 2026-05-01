@@ -143,7 +143,7 @@ def clean_tickers(tickers):
                 cleaned.append(t)
     return list(set(cleaned))
 
-def save_daily_log_detail(df):
+def save_daily_log_detail(df, creds_dict):
 
     scope = [
         "https://spreadsheets.google.com/feeds",
