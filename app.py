@@ -178,9 +178,9 @@ for ticker in all_tickers: # unique_tickers から all_tickers に変更
         div_warning_tickers.append(ticker)
 
 # --- 配当・データ取得の警告表示 ---
-if errors:
-    # 以前の div_errors の代わりに、一括取得で発生した errors を表示します
-    st.sidebar.error(f"❌ データ取得失敗: {', '.join(errors)}")
+if price_errors:
+    # 以前の div_errors の代わりに、一括取得で発生した price_errors を表示します
+    st.sidebar.error(f"❌ データ取得失敗: {', '.join(price_errors)}")
     
 if div_warning_tickers:
     st.sidebar.warning(f"⚠️ 配当要確認: {', '.join(div_warning_tickers)}")
@@ -191,9 +191,9 @@ else:
 # 既に上で errors を使って st.sidebar.error を出しているなら、この if ブロックは丸ごと削除してOKです。
 # もし残したい場合は以下のように書き換えます。
 
-if errors:
-    # 既存の errors を使う（perf_errors という名前はもう使いません）
-    st.sidebar.warning(f"⚠️ 一部銘柄の騰落データが不完全です: {', '.join(errors)}")
+if price_errors:
+    # 既存の price_errors を使う（perf_errors という名前はもう使いません）
+    st.sidebar.warning(f"⚠️ 一部銘柄の騰落データが不完全です: {', '.join(price_errors)}")
 else:
     st.sidebar.success("前日比データ取得：正常")
 
