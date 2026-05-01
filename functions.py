@@ -1,5 +1,7 @@
 import pandas as pd
 import yfinance as yf
+import os
+import json
 
 # --- 為替 ---
 def get_fx(symbol, default):
