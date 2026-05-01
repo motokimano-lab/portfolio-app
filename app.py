@@ -111,6 +111,30 @@ df["day_diff_pct"] = df["ticker"].map(lambda x: perf_dict.get(x, (0.0, 0.0))[1])
 # 基本データの計算（為替反映、value_jpyの作成など）
 df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
+#cron-jobの自動保存用コード
+if st.query_params.get("auto_save") == "1":
+
+    errors = []
+
+    if price_errors:
+        errors.append(f"価格NG: {price_errors}")
+
+    if usd_error or vnd_error:
+        errors.append("為替NG")
+
+    if any(v is None for v in price_dict.values()):
+        errors.append("価格Noneあり")
+
+    if errors:
+        st.write("AUTO SAVE SKIPPED:", errors)
+        st.stop()
+
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    result = save_daily_log_detail(df, creds_dict)
+
+    st.write("AUTO SAVE:", result)
+    st.stop()
+
 # 年間配当金の計算 (評価額 * 過去1年実績の利回り)
 df["annual_div_jpy"] = df["value_jpy"] * df["div_yield"]
 # 評価額の計算
