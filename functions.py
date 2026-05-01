@@ -2,7 +2,7 @@ import pandas as pd
 import yfinance as yf
 import os
 import json
-
+import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 # --- 為替 ---
