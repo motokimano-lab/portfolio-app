@@ -95,7 +95,7 @@ df["ticker"] = df["ticker"].astype(str).str.strip()
 all_tickers = df["ticker"].unique()
 
 # 一括取得関数を1回だけ呼ぶ
-price_dict, div_yield_dict, perf_dict, errors = get_assets_data_bulk(all_tickers)
+price_dict, div_yield_dict, perf_dict, price_errors = get_assets_data_bulk(all_tickers)
 
 # 現金データの定義
 price_dict["CASH"] = 1.0
@@ -161,8 +161,8 @@ selected_accounts = st.sidebar.multiselect("口座種別を選択", all_accounts
 
 st.sidebar.header("📡 データ取得状態")
 
-if errors:
-    st.warning(f"データ取得失敗（直近の終値や配当が取得できませんでした）: {errors}")
+if price_errors:
+    st.warning(f"データ取得失敗（直近の終値や配当が取得できませんでした）: {price_errors}")
 else:
     st.sidebar.success("価格データ取得：正常")
 
