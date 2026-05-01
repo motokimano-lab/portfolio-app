@@ -116,7 +116,7 @@ if st.query_params.get("auto_save") == "1":
 
     errors = []
 
-    if price_errors:
+    if price_errors or any(v is None or v <= 0 for v in price_dict.values()):
         errors.append(f"価格NG: {price_errors}")
 
     if usd_error or vnd_error:
