@@ -2,11 +2,8 @@ name: Auto Save Portfolio Log
 
 on:
   schedule:
-    - cron: '45 21 * * *'
-    - cron: '55 21 * * *'
-    - cron: '05 22 * * *'
-    - cron: '15 22 * * *'
-    - cron: '25 22 * * *'
+    - cron: '- - * * *'
+
   workflow_dispatch:
 
 jobs:
