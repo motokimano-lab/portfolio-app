@@ -118,7 +118,7 @@ df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 # --- AUTO SAVE ---
 if st.query_params.get("auto_save") == "1":
 
-    print("AUTO SAVE START")
+    st.write("AUTO SAVE TRIGGERED")
 
     # --- 異常検知 ---
     has_price_error = price_errors
@@ -130,7 +130,7 @@ if st.query_params.get("auto_save") == "1":
 
     has_invalid_df = df["value_jpy"].isna().any()
 
-    print("CHECK STATUS:", {
+    st.write("CHECK STATUS:", {
         "price_errors": price_errors,
         "usd_error": usd_error,
         "vnd_error": vnd_error,
@@ -139,7 +139,7 @@ if st.query_params.get("auto_save") == "1":
     })
 
     if has_price_error or has_fx_error or has_invalid_price or has_invalid_df:
-        print("AUTO SAVE SKIPPED")
+        st.write("RESULT:", result)
         st.stop()
 
     # --- 保存 ---
