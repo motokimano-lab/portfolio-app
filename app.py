@@ -115,27 +115,39 @@ df["day_diff_pct"] = df["ticker"].map(lambda x: perf_dict.get(x, (0.0, 0.0))[1])
 df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
 #cron-jobの自動保存用コード
+# --- AUTO SAVE ---
 if st.query_params.get("auto_save") == "1":
 
-    errors = []
+    print("AUTO SAVE START")
 
-    if price_errors or any(v is None or v <= 0 for v in price_dict.values()):
-        errors.append(f"価格NG: {price_errors}")
+    # --- 異常検知 ---
+    has_price_error = price_errors
+    has_fx_error = usd_error or vnd_error
 
-    if usd_error or vnd_error:
-        errors.append("為替NG")
+    has_invalid_price = any(
+        v is None or v <= 0 for v in price_dict.values()
+    )
 
-    if any(v is None for v in price_dict.values()):
-        errors.append("価格Noneあり")
+    has_invalid_df = df["value_jpy"].isna().any()
 
-    if errors:
-        st.write("AUTO SAVE SKIPPED:", errors)
+    print("CHECK STATUS:", {
+        "price_errors": price_errors,
+        "usd_error": usd_error,
+        "vnd_error": vnd_error,
+        "invalid_price": has_invalid_price,
+        "invalid_df": has_invalid_df
+    })
+
+    if has_price_error or has_fx_error or has_invalid_price or has_invalid_df:
+        print("AUTO SAVE SKIPPED")
         st.stop()
 
+    # --- 保存 ---
     creds_dict = dict(st.secrets["gcp_service_account"])
     result = save_daily_log_detail(df, creds_dict)
 
-    st.write("AUTO SAVE:", result)
+    print("AUTO SAVE DONE:", result)
+
     st.stop()
 
 # 年間配当金の計算 (評価額 * 過去1年実績の利回り)
