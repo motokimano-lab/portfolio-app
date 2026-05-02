@@ -119,7 +119,7 @@ df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 if st.query_params.get("auto_save") == "1":
 
     st.write("AUTO SAVE TRIGGERED")
-
+    print("AUTO SAVE TRIGGERED")
     # --- 異常検知 ---
     has_price_error = price_errors
     has_fx_error = usd_error or vnd_error
@@ -140,6 +140,7 @@ if st.query_params.get("auto_save") == "1":
 
     if has_price_error or has_fx_error or has_invalid_price or has_invalid_df:
         st.write("RESULT:", result)
+        print("RESULT:", result)
         st.stop()
 
     # --- 保存 ---
