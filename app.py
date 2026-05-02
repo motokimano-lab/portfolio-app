@@ -146,6 +146,7 @@ if st.query_params.get("auto_save") == "1":
     creds_dict = dict(st.secrets["gcp_service_account"])
     result = save_daily_log_detail(df, creds_dict)
 
+    st.write("AUTO SAVE DONE:", result)
     print("AUTO SAVE DONE:", result)
 
     st.stop()
