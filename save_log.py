@@ -16,8 +16,6 @@ from functions import (
 url = "https://docs.google.com/spreadsheets/d/18PLN9uJHxVZCAvAw92piWCniLlQ2i8Z6dT8ok_jycBI/export?format=csv&gid=0"
 df = pd.read_csv(url)
 
-df = pd.read_csv("data.csv")  # ←仮（あとで合わせる）
-
 # --- ② 為替
 usd_jpy, usd_error = get_fx("JPY=X", 150)
 vnd_jpy, vnd_error = get_fx("VNDJPY=X", 0.006)
