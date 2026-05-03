@@ -1,62 +1,49 @@
+import json
+import os
 import pandas as pd
 
 from functions import (
     get_fx,
-    get_price,
+    get_assets_data_bulk,
     prepare_base_dataframe,
-    save_daily_log_detail,
+    save_daily_log_detail
 )
 
+# --- ① データ読み込み（ここ重要）
+# 今app.pyでやってる「df作成部分」をコピペ
+# （Google Sheetsから読むでもOK）
 # 元データ読み込み
 url = "https://docs.google.com/spreadsheets/d/18PLN9uJHxVZCAvAw92piWCniLlQ2i8Z6dT8ok_jycBI/export?format=csv&gid=0"
 df = pd.read_csv(url)
 
-# 為替取得
-usd_jpy = get_fx("JPY=X", 150)
-vnd_jpy = get_fx("VNDJPY=X", 0.006)
+df = pd.read_csv("data.csv")  # ←仮（あとで合わせる）
 
-# -------------------------
-# 先に price を更新する
-# -------------------------
+# --- ② 為替
+usd_jpy, usd_error = get_fx("JPY=X", 150)
+vnd_jpy, vnd_error = get_fx("VNDJPY=X", 0.006)
 
-warning_tickers = []
+# --- ③ ティッカー処理
+df["ticker"] = df["ticker"].astype(str).str.strip()
+tickers = df["ticker"].unique()
 
-for idx, row in df.iterrows():
+price_dict, div_dict, perf_dict, errors = get_assets_data_bulk(tickers)
 
-    ticker = row["ticker"]
+# --- ④ マッピング
+df["price"] = df["ticker"].map(lambda x: price_dict.get(x))
+df["div_yield"] = df["ticker"].map(lambda x: div_dict.get(x, 0))
+df["day_diff_val"] = df["ticker"].map(lambda x: perf_dict.get(x, (0,0))[0])
+df["day_diff_pct"] = df["ticker"].map(lambda x: perf_dict.get(x, (0,0))[1])
 
-    if ticker == "CASH":
-        df.at[idx, "price"] = 1
-        continue
+# --- ⑤ 計算
+df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
-    fallback_price = row["cost_price"]
+# --- ⑥ 異常チェック（これ今のロジックそのまま使える）
+if errors or usd_error or vnd_error:
+    print("ERROR DETECTED → SKIP SAVE")
+    exit()
 
-    price, used_fallback = get_price(
-        ticker,
-        fallback_price
-    )
+# --- ⑦ 保存
+creds_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
+result = save_daily_log_detail(df, creds_dict)
 
-    df.at[idx, "price"] = price
-
-    if used_fallback:
-        warning_tickers.append(ticker)
-
-if warning_tickers:
-    print(
-        f"価格取得失敗（fallback使用）→ "
-        f"{', '.join(set(warning_tickers))}"
-    )
-
-# -------------------------
-# price更新後に前処理
-# -------------------------
-
-df = prepare_base_dataframe(
-    df,
-    usd_jpy,
-    vnd_jpy
-)
-
-# 保存
-result = save_daily_log_detail(df)
 print(result)
