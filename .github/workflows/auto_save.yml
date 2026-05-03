@@ -3,9 +3,9 @@ name: Auto Save
 on:
   workflow_dispatch:
   schedule:
-    cron: '25 8 * * *'  # ←日本時間7時
-    cron: '27 8 * * *'
-    cron: '30 8 * * *'
+    - cron: '45 8 * * *'  # ←日本時間7時
+    - cron: '47 8 * * *'
+    - cron: '50 8 * * *'
     
 jobs:
   run:
