@@ -1,2 +1,27 @@
-- name: Run auto save
-  run: save_log.py
+name: Auto Save
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 22 * * *'  # ←日本時間7時
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run auto save
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: python save_log.py
