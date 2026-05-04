@@ -10,9 +10,6 @@ from functions import (
 )
 
 # --- ① データ読み込み（ここ重要）
-# 今app.pyでやってる「df作成部分」をコピペ
-# （Google Sheetsから読むでもOK）
-# 元データ読み込み
 url = "https://docs.google.com/spreadsheets/d/18PLN9uJHxVZCAvAw92piWCniLlQ2i8Z6dT8ok_jycBI/export?format=csv&gid=0"
 df = pd.read_csv(url)
 
@@ -21,10 +18,14 @@ usd_jpy, usd_error = get_fx("JPY=X", 150)
 vnd_jpy, vnd_error = get_fx("VNDJPY=X", 0.006)
 
 # --- ③ ティッカー処理
-df["ticker"] = df["ticker"].astype(str).str.strip()
+df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
 tickers = df["ticker"].unique()
 
 price_dict, div_dict, perf_dict, errors = get_assets_data_bulk(tickers)
+
+price_dict["CASH"] = 1.0
+div_dict["CASH"] = 0.0
+perf_dict["CASH"] = (0.0, 0.0)
 
 # --- ④ マッピング
 df["price"] = df["ticker"].map(lambda x: price_dict.get(x))
