@@ -567,7 +567,7 @@ for _, row in df_div_grouped.iterrows():
     d_unique_id = f"DivItem-{ac}-{sector}-{ticker}"
     
     d_ids.append(d_unique_id); d_parents.append(d_parent_id); d_labels.append(ticker)
-    d_values.append(row['annual_div_jpy']) # サイズは年間配当額
+    d_values.append(row['after_tax_div_jpy']) # サイズは年間配当額
     d_colors.append(row['div_yield'])      # 色は利回り
 
 # 3. 描画
