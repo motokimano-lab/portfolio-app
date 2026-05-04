@@ -513,6 +513,9 @@ d1.metric("年間配当（税引前）", f"{total_div_pre:,.0f} 円")
 d2.metric("年間配当（税引後）", f"{total_div_post:,.0f} 円")
 d3.metric("月平均（税引後）", f"{(total_div_post/12):,.0f} 円")
 
+print("df columns:", df.columns)
+print("df_filtered columns:", df_filtered.columns)
+
 # --- (6) 配当金のツリーマップ ---
 import numpy as np
 import pandas as pd
