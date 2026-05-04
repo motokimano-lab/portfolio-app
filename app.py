@@ -540,7 +540,7 @@ d_ids, d_parents, d_labels, d_values, d_colors = [], [], [], [], []
 # (A) ルート
 d_root_id = "Div_Root"
 d_ids.append(d_root_id); d_parents.append(""); d_labels.append(f"年間配当（税引後）: {total_div_post:,.0f} 円")
-d_values.append(row['after_tax_div_jpy']) 
+d_values.append(0) 
 d_colors.append(df_div_grouped['div_yield'].mean() if not df_div_grouped.empty else 0)
 
 # (B) 資産クラス
