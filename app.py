@@ -504,7 +504,7 @@ with col_p3:
     st.plotly_chart(fig3, use_container_width=True)
 
 # --- (5) 年間配当金額 ---
-total_div_pre = df_filtered["annual_div_jpy"].sum()
+total_div_pre = df_filtered[df_filtered["ticker"] != "VOO"]["annual_div_jpy"].sum()
 total_div_post = df_filtered["after_tax_div_jpy"].sum()
 st.markdown("---")
 st.header("💰 Dividend Summary")
@@ -524,7 +524,7 @@ df_div_map['sector_group'] = df_div_map['sector_group'].replace(['', ' ', 'nan',
 
 # 銘柄単位で集計（配当額は合計、利回りは平均をとる）
 df_div_grouped = df_div_map.groupby(['asset_class', 'sector_group', 'display_name'], dropna=False).agg({
-    'annual_div_jpy': 'sum',
+    'after_tax_div': 'sum',
     'div_yield': 'mean'
 }).reset_index()
 
@@ -537,7 +537,7 @@ d_ids, d_parents, d_labels, d_values, d_colors = [], [], [], [], []
 # (A) ルート
 d_root_id = "Div_Root"
 d_ids.append(d_root_id); d_parents.append(""); d_labels.append(f"年間配当（税引後）: {total_div_post:,.0f} 円")
-d_values.append(0) 
+d_values.append(row['after_tax_div']) 
 d_colors.append(df_div_grouped['div_yield'].mean() if not df_div_grouped.empty else 0)
 
 # (B) 資産クラス
