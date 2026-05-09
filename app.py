@@ -12,7 +12,8 @@ from functions import (
     get_fx,
     prepare_base_dataframe,
     save_daily_log_detail,
-    get_assets_data_bulk
+    get_assets_data_bulk,
+    compare_portfolio
 )
 import functions
 print(dir(functions))
@@ -780,33 +781,16 @@ if 'df_log' in locals() and not df_log.empty:
         with col_d2:
             e_date = st.selectbox("比較終了日", date_list, index=len(date_list)-1, key="growth_e")
 
-        # --- A. 期間データの抽出 ---
-        d_start_raw = df_comp[df_comp["date"] == s_date].copy()
-        d_end_raw = df_comp[df_comp["date"] == e_date].copy()
-
-        # --- B. 銘柄単位で集計（名義や口座の重複を合算して「10倍問題」を解決） ---
-        def summarize_assets(df_target):
-            # あなたのアプリの実際の列名 [value_jpy] を使用
-            return df_target.groupby(["asset_class", "sector", "display_name"], dropna=False)["value_jpy"].sum().reset_index()
-
-        d_start = summarize_assets(d_start_raw)
-        d_end = summarize_assets(d_end_raw)
-
-        # --- C. データのマージ ---
-        d_merged = pd.merge(
-            d_end, d_start, 
-            on=["asset_class", "sector", "display_name"], 
-            how="outer", suffixes=("_end", "_start")
-        ).fillna(0)
-
-        # 騰落率の計算
-        d_merged["diff_val"] = d_merged["value_jpy_end"] - d_merged["value_jpy_start"]
-        d_merged["growth_pct"] = d_merged.apply(
-            lambda r: (r["diff_val"] / r["value_jpy_start"] * 100) if r["value_jpy_start"] != 0 else 0, 
-            axis=1
+        d_merged, summary = compare_portfolio(
+        df_log,
+        s_date,
+        e_date
         )
-        d_merged["growth_pct"] = d_merged["growth_pct"].fillna(0)
-        d_merged["growth_pct"] = d_merged["growth_pct"].round(2)
+
+        total_start = summary["total_start"]
+        total_end = summary["total_end"]
+        total_diff = summary["total_diff"]
+        total_growth = summary["total_growth"]
 
         # 2. グラフデータの構築
         ids, parents, labels, values, colors, hover_texts, custom_vals = [], [], [], [], [], [], []
