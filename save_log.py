@@ -1,6 +1,7 @@
 import json
 import os
 import pandas as pd
+import requests
 
 from functions import (
     get_fx,
@@ -46,3 +47,19 @@ creds_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
 result = save_daily_log_detail(df, creds_dict)
 
 print(result)
+
+# --- Discord通知 ---
+webhook_url = os.environ["DISCORD_WEBHOOK_URL"]
+
+total_asset = int(df["value_jpy"].sum())
+total_div = int(df["after_tax_div_jpy"].sum())
+
+message = {
+    "content": (
+        f"✅ Auto Save Success\n"
+        f"💰 総資産: {total_asset:,} 円\n"
+        f"📈 税引後配当: {total_div:,} 円"
+    )
+}
+
+requests.post(webhook_url, json=message)
