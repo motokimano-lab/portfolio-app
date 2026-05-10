@@ -538,3 +538,5 @@ def get_price(ticker, fallback_price):
 
     except:
         return fallback_price, True
+
+print("functions loaded")
