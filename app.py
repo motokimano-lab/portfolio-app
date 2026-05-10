@@ -974,7 +974,7 @@ if 'df_log' in locals() and not df_log.empty:
         col_sector, col_asset = st.columns(2)
 
         with col_sector:
-            st.subheader("🏭 セクター別騰落率")
+            st.subheader("🏭 日本株セクター別騰落率")
 
             sector_display = sector_summary.copy()
 
