@@ -693,10 +693,6 @@ else:
 st.header("📈 資産推移（構成比）")
 
 df_log = load_daily_log_detail()
-#てすてすテスト
-compare_result = compare_latest_logs(df_log)
-st.write(compare_result)
-
 
 if not df_log.empty:
 
