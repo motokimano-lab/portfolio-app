@@ -217,6 +217,92 @@ def save_daily_log_detail(df, creds_dict):
 
     return f"{len(rows)} rows saved (overwrite mode)"
 
+def compare_portfolio(df_log, start_date, end_date):
+
+    df_comp = df_log.copy()
+
+    df_comp["value_jpy"] = pd.to_numeric(
+        df_comp["value_jpy"],
+        errors="coerce"
+    ).fillna(0)
+
+    df_comp["date"] = pd.to_datetime(df_comp["date"]).dt.date
+
+    # 期間抽出
+    d_start_raw = df_comp[df_comp["date"] == start_date].copy()
+    d_end_raw = df_comp[df_comp["date"] == end_date].copy()
+
+    # 集計
+    def summarize_assets(df_target):
+        return (
+            df_target
+            .groupby(
+                ["asset_class", "sector", "display_name"],
+                dropna=False
+            )["value_jpy"]
+            .sum()
+            .reset_index()
+        )
+
+    d_start = summarize_assets(d_start_raw)
+    d_end = summarize_assets(d_end_raw)
+
+    # マージ
+    d_merged = pd.merge(
+        d_end,
+        d_start,
+        on=["asset_class", "sector", "display_name"],
+        how="outer",
+        suffixes=("_end", "_start")
+    ).fillna(0)
+
+    # 差分計算
+    d_merged["diff_val"] = (
+        d_merged["value_jpy_end"]
+        - d_merged["value_jpy_start"]
+    )
+
+    d_merged["growth_pct"] = d_merged.apply(
+        lambda r:
+        (
+            r["diff_val"]
+            / r["value_jpy_start"]
+            * 100
+        )
+        if r["value_jpy_start"] != 0
+        else 0,
+        axis=1
+    )
+
+    d_merged["growth_pct"] = (
+        d_merged["growth_pct"]
+        .fillna(0)
+        .round(2)
+    )
+
+    # summary
+    total_end = d_merged["value_jpy_end"].sum()
+    total_start = d_merged["value_jpy_start"].sum()
+
+    total_diff = total_end - total_start
+
+    total_growth = (
+        (total_diff / total_start * 100)
+        if total_start != 0
+        else 0
+    )
+
+    summary = {
+        "total_start": total_start,
+        "total_end": total_end,
+        "total_diff": total_diff,
+        "total_growth": total_growth
+    }
+
+    return d_merged, summary
+
+
+
 #一旦get_priceを復活
 
 def get_price(ticker, fallback_price):
