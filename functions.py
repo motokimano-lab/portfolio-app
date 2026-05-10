@@ -528,6 +528,27 @@ def compare_latest_logs(df_log):
         "merged": d_merged
     }
 
+def load_daily_log_detail(creds_dict):
+
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(
+        creds_dict, scope
+    )
+
+    client = gspread.authorize(creds)
+
+    spreadsheet = client.open("portfolio_data")
+    sheet = spreadsheet.worksheet("Daily_Log")
+
+    data = sheet.get_all_records()
+    df_log = pd.DataFrame(data)
+
+    return df_log
+
 #一旦get_priceを復活
 
 def get_price(ticker, fallback_price):
