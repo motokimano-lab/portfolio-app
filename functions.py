@@ -292,11 +292,67 @@ def compare_portfolio(df_log, start_date, end_date):
         else 0
     )
 
+    # --- ランキング生成 ---
+
+# 値上がり率TOP10
+    top_gainers = (
+        d_merged
+        .sort_values("growth_pct", ascending=False)
+        .head(10)
+        [[
+            "display_name",
+            "growth_pct",
+            "diff_val"
+        ]]
+    )
+
+# 値下がり率TOP10
+    top_losers = (
+        d_merged
+        .sort_values("growth_pct", ascending=True)
+        .head(10)
+        [[
+            "display_name",
+            "growth_pct",
+            "diff_val"
+        ]]
+    )
+
+# 金額増加TOP10
+    top_diff_up = (
+        d_merged
+        .sort_values("diff_val", ascending=False)
+        .head(10)
+        [[
+            "display_name",
+            "growth_pct",
+            "diff_val"
+        ]]
+    )
+
+# 金額減少TOP10
+    top_diff_down = (
+        d_merged
+        .sort_values("diff_val", ascending=True)
+        .head(10)
+        [[
+            "display_name",
+            "growth_pct",
+            "diff_val"
+        ]]
+    )
+
     summary = {
         "total_start": total_start,
         "total_end": total_end,
         "total_diff": total_diff,
-        "total_growth": total_growth
+        "total_growth": total_growth,
+
+        "top_gainers": top_gainers,
+        "top_losers": top_losers,
+
+        "top_diff_up": top_diff_up,
+        "top_diff_down": top_diff_down
     }
 
     return d_merged, summary
