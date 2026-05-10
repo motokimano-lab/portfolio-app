@@ -60,15 +60,40 @@ compare_result = compare_latest_logs(df_log)
 # Discord通知
 webhook_url = os.environ["DISCORD_WEBHOOK_URL"]
 
+# TOPランキング取得
+top_gainers = compare_result["top_gainers"]
+top_losers = compare_result["top_losers"]
+
+# TOP3だけ使う
+gain_text = ""
+for _, row in top_gainers.head(3).iterrows():
+    gain_text += (
+        f"{row['display_name']} "
+        f"{row['growth_pct']:+.2f}%\n"
+    )
+
+loss_text = ""
+for _, row in top_losers.head(3).iterrows():
+    loss_text += (
+        f"{row['display_name']} "
+        f"{row['growth_pct']:+.2f}%\n"
+    )
+
 msg = f"""
 📊 Portfolio Update
 
-総資産:
+💰 総資産
 {compare_result['total_end']:,.0f} 円
 
-前日比:
+📈 前日比
 {compare_result['total_diff']:+,.0f} 円
 ({compare_result['total_growth']:+.2f}%)
+
+🟢 TOP Gainers
+{gain_text}
+
+🔴 TOP Losers
+{loss_text}
 """
 
 requests.post(
