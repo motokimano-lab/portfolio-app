@@ -911,9 +911,7 @@ if 'df_log' in locals() and not df_log.empty:
                     "騰落率(%)",
                     "増減額(円)"
                 ]]
-                .reset_index(drop=True),
-                use_container_width=True,
-                hide_index=True
+                .reset_index(drop=True)
             )
 
         with col2:
@@ -934,9 +932,7 @@ if 'df_log' in locals() and not df_log.empty:
                     "騰落率(%)",
                     "増減額(円)"
                 ]]
-                .reset_index(drop=True),
-                use_container_width=True,
-                hide_index=True
+                .reset_index(drop=True)
             )
 
         # --- 増減額ランキング ---
@@ -963,9 +959,7 @@ if 'df_log' in locals() and not df_log.empty:
                     "騰落率(%)",
                     "増減額(円)"
                 ]]
-                .reset_index(drop=True),
-                use_container_width=True,
-                hide_index=True
+                .reset_index(drop=True)
             )
 
         with col4:
@@ -986,9 +980,7 @@ if 'df_log' in locals() and not df_log.empty:
                     "騰落率(%)",
                     "増減額(円)"
                 ]]
-                .reset_index(drop=True),
-                use_container_width=True,
-                hide_index=True
+                .reset_index(drop=True)
             )
 
       # --- セクター＆アセット分析 ---
@@ -1022,9 +1014,7 @@ if 'df_log' in locals() and not df_log.empty:
                     "騰落率(%)",
                     "増減額(円)"
                 ]]
-                .reset_index(drop=True),
-                use_container_width=True,
-                hide_index=True
+                .reset_index(drop=True)
             )
 
         with col6:
@@ -1053,9 +1043,7 @@ if 'df_log' in locals() and not df_log.empty:
                     "騰落率(%)",
                     "増減額(円)"
                 ]]
-                .reset_index(drop=True),
-                use_container_width=True,
-                hide_index=True
+                .reset_index(drop=True)
             )      
 
     else:
