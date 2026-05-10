@@ -885,51 +885,82 @@ if 'df_log' in locals() and not df_log.empty:
         fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
         st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_v3")
 
+        
+        # --- 騰落率ランキング ---
         st.markdown("---")
-        st.subheader("📈 値上がり率 TOP10")
+        st.subheader("📈 騰落率ランキング")
 
-        st.dataframe(
-            top_gainers.rename(columns={
-                "display_name": "銘柄",
-                "growth_pct": "騰落率(%)",
-                "diff_val": "増減額(円)"
-            }),
-            use_container_width=True
-        )
+        col1, col2 = st.columns(2)
 
-        st.subheader("📉 値下がり率 Worst10")
+        with col1:
+            st.markdown("### 🟢 値上がり率 TOP10")
 
-        st.dataframe(
-            top_losers.rename(columns={
-                "display_name": "銘柄",
-                "growth_pct": "騰落率(%)",
-                "diff_val": "増減額(円)"
-            }),
-            use_container_width=True
-        )
+            df_gain = top_gainers.copy()
+            df_gain["growth_pct"] = df_gain["growth_pct"].round(2)
+            df_gain["diff_val"] = df_gain["diff_val"].astype(int)
 
+            st.dataframe(
+                df_gain.rename(columns={
+                    "display_name": "銘柄",
+                    "growth_pct": "騰落率(%)",
+                    "diff_val": "増減額(円)"
+                }),
+                use_container_width=True
+            )
+
+        with col2:
+            st.markdown("### 🔴 値下がり率 TOP10")
+
+            df_loss = top_losers.copy()
+            df_loss["growth_pct"] = df_loss["growth_pct"].round(2)
+            df_loss["diff_val"] = df_loss["diff_val"].astype(int)
+
+            st.dataframe(
+                df_loss.rename(columns={
+                    "display_name": "銘柄",
+                    "growth_pct": "騰落率(%)",
+                    "diff_val": "増減額(円)"
+                }),
+                use_container_width=True
+            )
+
+        # --- 増減額ランキング ---
         st.markdown("---")
-        st.subheader("💰 資産増加額 TOP10")
+        st.subheader("💰 増減額ランキング")
 
-        st.dataframe(
-            top_diff_up.rename(columns={
-                "display_name": "銘柄",
-                "growth_pct": "騰落率(%)",
-                "diff_val": "増減額(円)"
-            }),
-            use_container_width=True
-        )
+        col3, col4 = st.columns(2)
 
-        st.subheader("💸 資産減少額 Worst10")
+        with col3:
+            st.markdown("### 🚀 資産増加額 TOP10")
 
-        st.dataframe(
-            top_diff_down.rename(columns={
-                "display_name": "銘柄",
-                "growth_pct": "騰落率(%)",
-                "diff_val": "増減額(円)"
-            }),
-            use_container_width=True
-        )
+            df_up = top_diff_up.copy()
+            df_up["growth_pct"] = df_up["growth_pct"].round(2)
+            df_up["diff_val"] = df_up["diff_val"].astype(int)
+
+            st.dataframe(
+                df_up.rename(columns={
+                    "display_name": "銘柄",
+                    "growth_pct": "騰落率(%)",
+                    "diff_val": "増減額(円)"
+                }),
+                use_container_width=True
+            )
+
+        with col4:
+            st.markdown("### 📉 資産減少額 TOP10")
+
+            df_down = top_diff_down.copy()
+            df_down["growth_pct"] = df_down["growth_pct"].round(2)
+            df_down["diff_val"] = df_down["diff_val"].astype(int)
+
+            st.dataframe(
+                df_down.rename(columns={
+                    "display_name": "銘柄",
+                    "growth_pct": "騰落率(%)",
+                    "diff_val": "増減額(円)"
+                }),
+                use_container_width=True
+            )
 
     
 
