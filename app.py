@@ -929,15 +929,21 @@ if 'df_log' in locals() and not df_log.empty:
         
         # --- 騰落率ランキング ---
         st.markdown("---")
-        st.subheader("📈 騰落率ランキング")
+        st.markdown("## 📈 騰落率ランキング")
 
         df_gain = top_gainers.copy()
         df_loss = top_losers.copy()
-        
-        html_gain = "<table class='rank-table'>"
-        html_gain += "<tr><th>銘柄</th><th>騰落率</th><th>増減額</th></tr>"
 
-        for _, row in df_gain.iterrows():
+        html_gain = """
+        <table class='rank-table'>
+        <tr>
+        <th>銘柄</th>
+        <th>騰落率</th>
+        <th>増減額</th>
+        </tr>
+        """
+
+                for _, row in df_gain.iterrows():
             html_gain += f"""
             <tr>
                 <td>{row['display_name']}</td>
@@ -948,10 +954,16 @@ if 'df_log' in locals() and not df_log.empty:
 
         html_gain += "</table>"
 
-        html_loss = "<table class='rank-table'>"
-        html_loss += "<tr><th>銘柄</th><th>騰落率</th><th>増減額</th></tr>"
+        html_loss = """
+        <table class='rank-table'>
+        <tr>
+        <th>銘柄</th>
+        <th>騰落率</th>
+        <th>増減額</th>
+        </tr>
+        """
 
-        for _, row in df_loss.iterrows():
+                for _, row in df_loss.iterrows():
             html_loss += f"""
             <tr>
                 <td>{row['display_name']}</td>
@@ -977,8 +989,6 @@ if 'df_log' in locals() and not df_log.empty:
 
         </div>
         """, unsafe_allow_html=True)
-
-
         
         # --- 増減額ランキング ---
         st.markdown("---")
