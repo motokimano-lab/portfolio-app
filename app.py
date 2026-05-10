@@ -33,29 +33,6 @@ print("使用ticker一覧:", df["ticker"].unique())
 
 st.set_page_config(layout="wide") # 画面を広く使う設定
 
-st.markdown("""
-<style>
-
-/* スマホ時でもcolumnsを横並び維持 */
-@media (max-width: 768px) {
-    div[data-testid="column"] {
-        width: 50% !important;
-        flex: 1 1 50% !important;
-        min-width: 0 !important;
-    }
-
-    /* dataframe文字サイズ縮小 */
-    .stDataFrame {
-        font-size: 10px !important;
-    }
-
-    .stDataFrame div {
-        font-size: 10px !important;
-    }
-}
-
-</style>
-""", unsafe_allow_html=True)
 
 st.title("My Portfolio Management")
 
@@ -924,7 +901,7 @@ if 'df_log' in locals() and not df_log.empty:
             df_gain["diff_val"] = (df_gain["diff_val"].astype(int).map(lambda x: f"{x:,}")
             )
 
-            st.dataframe(
+            st.table(
                 df_gain.rename(columns={
                     "display_name": "銘柄",
                     "growth_pct": "騰落率(%)",
@@ -947,7 +924,7 @@ if 'df_log' in locals() and not df_log.empty:
             df_loss["diff_val"] = (df_loss["diff_val"].astype(int).map(lambda x: f"{x:,}")
             )
 
-            st.dataframe(
+            st.table(
                 df_loss.rename(columns={
                     "display_name": "銘柄",
                     "growth_pct": "騰落率(%)",
@@ -976,7 +953,7 @@ if 'df_log' in locals() and not df_log.empty:
             df_up["diff_val"] = (df_up["diff_val"].astype(int).map(lambda x: f"{x:,}")
             )
 
-            st.dataframe(
+            st.table(
                 df_up.rename(columns={
                     "display_name": "銘柄",
                     "growth_pct": "騰落率(%)",
@@ -999,7 +976,7 @@ if 'df_log' in locals() and not df_log.empty:
             df_down["diff_val"] = (df_down["diff_val"].astype(int).map(lambda x: f"{x:,}")
             )
 
-            st.dataframe(
+            st.table(
                 df_down.rename(columns={
                     "display_name": "銘柄",
                     "growth_pct": "騰落率(%)",
@@ -1017,9 +994,9 @@ if 'df_log' in locals() and not df_log.empty:
       # --- セクター＆アセット分析 ---
         st.markdown("---")
 
-        col_sector, col_asset = st.columns(2)
+        col5, col6 = st.columns(2)
 
-        with col_sector:
+        with col5:
             st.subheader("🏭 日本株セクター別騰落率")
 
             sector_display = sector_summary.copy()
@@ -1035,7 +1012,7 @@ if 'df_log' in locals() and not df_log.empty:
                 .map(lambda x: f"{x:,}")
             )
 
-            st.dataframe(
+            st.table(
                 sector_display.rename(columns={
                     "sector": "セクター",
                     "growth_pct": "騰落率(%)",
@@ -1050,7 +1027,7 @@ if 'df_log' in locals() and not df_log.empty:
                 hide_index=True
             )
 
-        with col_asset:
+        with col6:
             st.subheader("📦 アセットクラス別騰落率")
 
             asset_display = asset_summary.copy()
@@ -1066,7 +1043,7 @@ if 'df_log' in locals() and not df_log.empty:
                 .map(lambda x: f"{x:,}")
             )
 
-            st.dataframe(
+            st.table(
                 asset_display.rename(columns={
                     "asset_class": "アセットクラス",
                     "growth_pct": "騰落率(%)",
