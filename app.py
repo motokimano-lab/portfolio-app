@@ -792,6 +792,13 @@ if 'df_log' in locals() and not df_log.empty:
         total_diff = summary["total_diff"]
         total_growth = summary["total_growth"]
 
+        top_gainers = summary["top_gainers"]
+        top_losers = summary["top_losers"]
+
+        top_diff_up = summary["top_diff_up"]
+        top_diff_down = summary["top_diff_down"]
+        
+
         # 2. グラフデータの構築
         ids, parents, labels, values, colors, hover_texts, custom_vals = [], [], [], [], [], [], []
         
@@ -877,6 +884,54 @@ if 'df_log' in locals() and not df_log.empty:
         ))
         fig_growth.update_layout(height=700, margin=dict(t=30, b=10, l=10, r=10))
         st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_v3")
+
+        st.markdown("---")
+        st.subheader("📈 値上がり率 TOP10")
+
+        st.dataframe(
+            top_gainers.rename(columns={
+                "display_name": "銘柄",
+                "growth_pct": "騰落率(%)",
+                "diff_val": "増減額(円)"
+            }),
+            use_container_width=True
+        )
+
+        st.subheader("📉 値下がり率 Worst10")
+
+        st.dataframe(
+            top_losers.rename(columns={
+                "display_name": "銘柄",
+                "growth_pct": "騰落率(%)",
+                "diff_val": "増減額(円)"
+            }),
+            use_container_width=True
+        )
+
+        st.markdown("---")
+        st.subheader("💰 資産増加額 TOP10")
+
+        st.dataframe(
+            top_diff_up.rename(columns={
+                "display_name": "銘柄",
+                "growth_pct": "騰落率(%)",
+                "diff_val": "増減額(円)"
+            }),
+            use_container_width=True
+        )
+
+        st.subheader("💸 資産減少額 Worst10")
+
+        st.dataframe(
+            top_diff_down.rename(columns={
+                "display_name": "銘柄",
+                "growth_pct": "騰落率(%)",
+                "diff_val": "増減額(円)"
+            }),
+            use_container_width=True
+        )
+
+    
 
     else:
         st.info("比較するには2つ以上のログデータが必要です。")
