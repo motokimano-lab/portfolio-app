@@ -343,8 +343,20 @@ def compare_portfolio(df_log, start_date, end_date):
     )
 
 # --- セクター別ランキング ---
+    d_merged_sector = d_merged.copy()
+
+    d_merged_sector["sector"] = (
+        d_merged_sector["sector"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+
+    d_merged_sector = d_merged_sector[
+        d_merged_sector["sector"] != ""
+    ]
     sector_summary = (
-        d_merged
+        d_merged_sector
         .groupby("sector", dropna=False)
         .agg({
             "value_jpy_start": "sum",
@@ -404,7 +416,7 @@ def compare_portfolio(df_log, start_date, end_date):
 
         "top_diff_up": top_diff_up,
         "top_diff_down": top_diff_down,
-
+        
         "sector_summary": sector_summary,
         "asset_summary": asset_summary
     }
