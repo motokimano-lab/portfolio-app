@@ -970,62 +970,66 @@ if 'df_log' in locals() and not df_log.empty:
 
       # --- セクター＆アセット分析 ---
         st.markdown("---")
-        st.subheader("🏭 セクター別騰落率")
 
-        sector_display = sector_summary.copy()
+        col_sector, col_asset = st.columns(2)
 
-        sector_display["growth_pct"] = (
-            sector_display["growth_pct"]
-            .round(2)
-        )
+        with col_sector:
+            st.subheader("🏭 セクター別騰落率")
 
-        sector_display["diff_val"] = (
-            sector_display["diff_val"]
-            .astype(int)
-            .map(lambda x: f"{x:,}")
-        )
+            sector_display = sector_summary.copy()
 
-        st.dataframe(
-            sector_display.rename(columns={
-                "sector": "セクター",
-                "growth_pct": "騰落率(%)",
-                "diff_val": "増減額(円)"
-            })[[
-                "セクター",
-                "騰落率(%)",
-                "増減額(円)"
+            sector_display["growth_pct"] = (
+                sector_display["growth_pct"]
+                .round(2)
+            )
+
+            sector_display["diff_val"] = (
+                sector_display["diff_val"]
+                .astype(int)
+                .map(lambda x: f"{x:,}")
+            )
+
+            st.dataframe(
+                sector_display.rename(columns={
+                    "sector": "セクター",
+                    "growth_pct": "騰落率(%)",
+                    "diff_val": "増減額(円)"
+                })[[
+                    "セクター",
+                    "騰落率(%)",
+                    "増減額(円)"
             ]],
-            use_container_width=True
-        )
+                use_container_width=True
+            )
 
-        # --- アセットクラス ---
-        st.subheader("📦 アセットクラス別騰落率")
+        with col_asset:
+            st.subheader("📦 アセットクラス別騰落率")
 
-        asset_display = asset_summary.copy()
+            asset_display = asset_summary.copy()
 
-        asset_display["growth_pct"] = (
-            asset_display["growth_pct"]
-            .round(2)
-        )
+            asset_display["growth_pct"] = (
+                asset_display["growth_pct"]
+                .round(2)
+            )
 
-        asset_display["diff_val"] = (
-            asset_display["diff_val"]
-            .astype(int)
-            .map(lambda x: f"{x:,}")
-        )
+            asset_display["diff_val"] = (
+                asset_display["diff_val"]
+                .astype(int)
+                .map(lambda x: f"{x:,}")
+            )
 
-        st.dataframe(
-            asset_display.rename(columns={
-                "asset_class": "アセットクラス",
-                "growth_pct": "騰落率(%)",
-                "diff_val": "増減額(円)"
-            })[[
-                "アセットクラス",
-                "騰落率(%)",
-                "増減額(円)"
-            ]],
-            use_container_width=True
-        )      
+            st.dataframe(
+                asset_display.rename(columns={
+                    "asset_class": "アセットクラス",
+                    "growth_pct": "騰落率(%)",
+                    "diff_val": "増減額(円)"
+                })[[
+                    "アセットクラス",
+                    "騰落率(%)",
+                    "増減額(円)"
+                ]],
+                use_container_width=True
+            )      
 
     else:
         st.info("比較するには2つ以上のログデータが必要です。")
