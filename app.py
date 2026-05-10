@@ -907,7 +907,12 @@ if 'df_log' in locals() and not df_log.empty:
                     "display_name": "銘柄",
                     "growth_pct": "騰落率(%)",
                     "diff_val": "増減額(円)"
-                }),
+                })[[
+                    "銘柄",
+                    "騰落率(%)",
+                    "増減額(円)"
+                ]]
+                .reset_index(drop=True),
                 use_container_width=True
             )
 
@@ -924,7 +929,12 @@ if 'df_log' in locals() and not df_log.empty:
                     "display_name": "銘柄",
                     "growth_pct": "騰落率(%)",
                     "diff_val": "増減額(円)"
-                }),
+                })[[
+                    "銘柄",
+                    "騰落率(%)",
+                    "増減額(円)"
+                ]]
+                .reset_index(drop=True),
                 use_container_width=True
             )
 
@@ -947,7 +957,12 @@ if 'df_log' in locals() and not df_log.empty:
                     "display_name": "銘柄",
                     "growth_pct": "騰落率(%)",
                     "diff_val": "増減額(円)"
-                }),
+                })[[
+                    "銘柄",
+                    "騰落率(%)",
+                    "増減額(円)"
+                ]]
+                .reset_index(drop=True),
                 use_container_width=True
             )
 
@@ -964,7 +979,12 @@ if 'df_log' in locals() and not df_log.empty:
                     "display_name": "銘柄",
                     "growth_pct": "騰落率(%)",
                     "diff_val": "増減額(円)"
-                }),
+                })[[
+                    "銘柄",
+                    "騰落率(%)",
+                    "増減額(円)"
+                ]]
+                .reset_index(drop=True),
                 use_container_width=True
             )
 
@@ -998,7 +1018,8 @@ if 'df_log' in locals() and not df_log.empty:
                     "セクター",
                     "騰落率(%)",
                     "増減額(円)"
-            ]],
+                ]]
+                .reset_index(drop=True),
                 use_container_width=True
             )
 
@@ -1027,7 +1048,8 @@ if 'df_log' in locals() and not df_log.empty:
                     "アセットクラス",
                     "騰落率(%)",
                     "増減額(円)"
-                ]],
+                ]]
+                .reset_index(drop=True),
                 use_container_width=True
             )      
 
