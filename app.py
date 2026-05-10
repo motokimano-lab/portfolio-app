@@ -33,7 +33,29 @@ print("使用ticker一覧:", df["ticker"].unique())
 
 st.set_page_config(layout="wide") # 画面を広く使う設定
 
+st.markdown("""
+<style>
 
+/* スマホ時でもcolumnsを横並び維持 */
+@media (max-width: 768px) {
+    div[data-testid="column"] {
+        width: 50% !important;
+        flex: 1 1 50% !important;
+        min-width: 0 !important;
+    }
+
+    /* dataframe文字サイズ縮小 */
+    .stDataFrame {
+        font-size: 10px !important;
+    }
+
+    .stDataFrame div {
+        font-size: 10px !important;
+    }
+}
+
+</style>
+""", unsafe_allow_html=True)
 
 st.title("My Portfolio Management")
 
