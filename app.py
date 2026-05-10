@@ -897,7 +897,8 @@ if 'df_log' in locals() and not df_log.empty:
 
             df_gain = top_gainers.copy()
             df_gain["growth_pct"] = df_gain["growth_pct"].round(2)
-            df_gain["diff_val"] = df_gain["diff_val"].astype(int)
+            df_gain["diff_val"] = (df_gain["diff_val"].astype(int).map(lambda x: f"{x:,}")
+            )
 
             st.dataframe(
                 df_gain.rename(columns={
@@ -913,7 +914,8 @@ if 'df_log' in locals() and not df_log.empty:
 
             df_loss = top_losers.copy()
             df_loss["growth_pct"] = df_loss["growth_pct"].round(2)
-            df_loss["diff_val"] = df_loss["diff_val"].astype(int)
+            df_loss["diff_val"] = (df_loss["diff_val"].astype(int).map(lambda x: f"{x:,}")
+            )
 
             st.dataframe(
                 df_loss.rename(columns={
@@ -935,7 +937,8 @@ if 'df_log' in locals() and not df_log.empty:
 
             df_up = top_diff_up.copy()
             df_up["growth_pct"] = df_up["growth_pct"].round(2)
-            df_up["diff_val"] = df_up["diff_val"].astype(int)
+            df_up["diff_val"] = (df_up["diff_val"].astype(int).map(lambda x: f"{x:,}")
+            )
 
             st.dataframe(
                 df_up.rename(columns={
@@ -951,7 +954,8 @@ if 'df_log' in locals() and not df_log.empty:
 
             df_down = top_diff_down.copy()
             df_down["growth_pct"] = df_down["growth_pct"].round(2)
-            df_down["diff_val"] = df_down["diff_val"].astype(int)
+            df_down["diff_val"] = (df_down["diff_val"].astype(int).map(lambda x: f"{x:,}")
+            )
 
             st.dataframe(
                 df_down.rename(columns={
