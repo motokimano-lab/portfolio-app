@@ -423,7 +423,106 @@ def compare_portfolio(df_log, start_date, end_date):
 
     return d_merged, summary
 
+def compare_latest_logs(df_log):
 
+    import pandas as pd
+
+    df_log = df_log.copy()
+
+    df_log["value_jpy"] = pd.to_numeric(
+        df_log["value_jpy"],
+        errors="coerce"
+    ).fillna(0)
+
+    df_log["date"] = pd.to_datetime(df_log["date"]).dt.date
+
+    date_list = sorted(df_log["date"].unique())
+
+    if len(date_list) < 2:
+        return None
+
+    start_date = date_list[-2]
+    end_date = date_list[-1]
+
+    d_start = df_log[df_log["date"] == start_date]
+    d_end = df_log[df_log["date"] == end_date]
+
+    def summarize_assets(df_target):
+        return (
+            df_target.groupby(
+                ["asset_class", "sector", "display_name"],
+                dropna=False
+            )["value_jpy"]
+            .sum()
+            .reset_index()
+        )
+
+    d_start = summarize_assets(d_start)
+    d_end = summarize_assets(d_end)
+
+    d_merged = pd.merge(
+        d_end,
+        d_start,
+        on=["asset_class", "sector", "display_name"],
+        how="outer",
+        suffixes=("_end", "_start")
+    ).fillna(0)
+
+    d_merged["diff_val"] = (
+        d_merged["value_jpy_end"]
+        - d_merged["value_jpy_start"]
+    )
+
+    d_merged["growth_pct"] = d_merged.apply(
+        lambda r:
+        (
+            r["diff_val"]
+            / r["value_jpy_start"]
+            * 100
+        )
+        if r["value_jpy_start"] != 0
+        else 0,
+        axis=1
+    )
+
+    total_start = d_merged["value_jpy_start"].sum()
+    total_end = d_merged["value_jpy_end"].sum()
+
+    total_diff = total_end - total_start
+
+    total_growth = (
+        total_diff / total_start * 100
+        if total_start != 0
+        else 0
+    )
+
+    top_gainers = (
+        d_merged.sort_values(
+            "growth_pct",
+            ascending=False
+        )
+        .head(10)
+    )
+
+    top_losers = (
+        d_merged.sort_values(
+            "growth_pct",
+            ascending=True
+        )
+        .head(10)
+    )
+
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "total_start": total_start,
+        "total_end": total_end,
+        "total_diff": total_diff,
+        "total_growth": total_growth,
+        "top_gainers": top_gainers,
+        "top_losers": top_losers,
+        "merged": d_merged
+    }
 
 #一旦get_priceを復活
 
