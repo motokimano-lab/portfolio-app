@@ -496,8 +496,12 @@ def compare_latest_logs(df_log):
         else 0
     )
 
+    ranking_df = d_merged[
+        d_merged["diff_val"].abs() > 1
+    ].copy()
+
     top_gainers = (
-        d_merged.sort_values(
+        ranking_df.sort_values(
             "growth_pct",
             ascending=False
         )
@@ -505,7 +509,7 @@ def compare_latest_logs(df_log):
     )
 
     top_losers = (
-        d_merged.sort_values(
+        ranking_df.sort_values(
             "growth_pct",
             ascending=True
         )
