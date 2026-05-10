@@ -36,21 +36,38 @@ st.set_page_config(layout="wide") # 画面を広く使う設定
 st.markdown("""
 <style>
 
-/* スマホ時でもcolumnsを横並び維持 */
+/* モバイルでも絶対横並び */
 @media (max-width: 768px) {
+
+    div[data-testid="stHorizontalBlock"] {
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        gap: 0.5rem !important;
+    }
+
     div[data-testid="column"] {
-        width: 50% !important;
-        flex: 1 1 50% !important;
+        flex: 1 1 0 !important;
         min-width: 0 !important;
+        width: 50% !important;
     }
 
-    /* dataframe文字サイズ縮小 */
+    /* dataframe全体 */
     .stDataFrame {
-        font-size: 10px !important;
+        font-size: 9px !important;
     }
 
+    /* dataframeセル */
     .stDataFrame div {
-        font-size: 10px !important;
+        font-size: 9px !important;
+    }
+
+    /* markdown文字 */
+    p, div {
+        font-size: 11px !important;
+    }
+
+    h3 {
+        font-size: 14px !important;
     }
 }
 
