@@ -292,7 +292,7 @@ def compare_portfolio(df_log, start_date, end_date):
         else 0
     )
 
-    # --- ランキング生成 ---
+# --- 個別銘柄ランキング生成 ---
 
 # 値上がり率TOP10
     top_gainers = (
@@ -342,6 +342,57 @@ def compare_portfolio(df_log, start_date, end_date):
         ]]
     )
 
+# --- セクター別ランキング ---
+    sector_summary = (
+        d_merged
+        .groupby("sector", dropna=False)
+        .agg({
+            "value_jpy_start": "sum",
+            "value_jpy_end": "sum",
+            "diff_val": "sum"
+        })
+        .reset_index()
+    )
+
+    sector_summary["growth_pct"] = sector_summary.apply(
+        lambda r: (
+            r["diff_val"] / r["value_jpy_start"] * 100
+            if r["value_jpy_start"] != 0 else 0
+        ),
+        axis=1
+    )
+
+    sector_summary = sector_summary.sort_values(
+        "growth_pct",
+        ascending=False
+    )
+
+# --- アセットクラス別ランキング ---
+    asset_summary = (
+        d_merged
+        .groupby("asset_class", dropna=False)
+        .agg({
+            "value_jpy_start": "sum",
+            "value_jpy_end": "sum",
+            "diff_val": "sum"
+        })
+        .reset_index()
+    )
+
+    asset_summary["growth_pct"] = asset_summary.apply(
+        lambda r: (
+            r["diff_val"] / r["value_jpy_start"] * 100
+            if r["value_jpy_start"] != 0 else 0
+        ),
+        axis=1
+    )
+
+    asset_summary = asset_summary.sort_values(
+        "growth_pct",
+        ascending=False
+    )
+
+# --- 各種ランキングまとめ ---    
     summary = {
         "total_start": total_start,
         "total_end": total_end,
@@ -352,7 +403,10 @@ def compare_portfolio(df_log, start_date, end_date):
         "top_losers": top_losers,
 
         "top_diff_up": top_diff_up,
-        "top_diff_down": top_diff_down
+        "top_diff_down": top_diff_down,
+
+        "sector_summary": sector_summary,
+        "asset_summary": asset_summary
     }
 
     return d_merged, summary
