@@ -913,7 +913,8 @@ if 'df_log' in locals() and not df_log.empty:
                     "増減額(円)"
                 ]]
                 .reset_index(drop=True),
-                use_container_width=True
+                use_container_width=True,
+                hide_index=True
             )
 
         with col2:
@@ -935,7 +936,8 @@ if 'df_log' in locals() and not df_log.empty:
                     "増減額(円)"
                 ]]
                 .reset_index(drop=True),
-                use_container_width=True
+                use_container_width=True,
+                hide_index=True
             )
 
         # --- 増減額ランキング ---
@@ -963,7 +965,8 @@ if 'df_log' in locals() and not df_log.empty:
                     "増減額(円)"
                 ]]
                 .reset_index(drop=True),
-                use_container_width=True
+                use_container_width=True,
+                hide_index=True
             )
 
         with col4:
@@ -985,7 +988,8 @@ if 'df_log' in locals() and not df_log.empty:
                     "増減額(円)"
                 ]]
                 .reset_index(drop=True),
-                use_container_width=True
+                use_container_width=True,
+                hide_index=True
             )
 
       # --- セクター＆アセット分析 ---
@@ -1020,7 +1024,8 @@ if 'df_log' in locals() and not df_log.empty:
                     "増減額(円)"
                 ]]
                 .reset_index(drop=True),
-                use_container_width=True
+                use_container_width=True,
+                hide_index=True
             )
 
         with col_asset:
@@ -1050,7 +1055,8 @@ if 'df_log' in locals() and not df_log.empty:
                     "増減額(円)"
                 ]]
                 .reset_index(drop=True),
-                use_container_width=True
+                use_container_width=True,
+                hide_index=True
             )      
 
     else:
