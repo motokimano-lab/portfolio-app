@@ -13,7 +13,8 @@ from functions import (
     prepare_base_dataframe,
     save_daily_log_detail,
     get_assets_data_bulk,
-    compare_portfolio
+    compare_portfolio,
+    compare_latest_logs
 )
 import functions
 print(dir(functions))
@@ -102,6 +103,10 @@ def load_daily_log_detail():
     df_log = pd.DataFrame(data)
 
     return df_log
+
+#てすてすテスト
+compare_result = compare_latest_logs(df_log)
+st.write(compare_result)
 
 # 為替取得
 usd_jpy, usd_error = get_fx("JPY=X", 150)
