@@ -35,42 +35,16 @@ st.set_page_config(layout="wide") # 画面を広く使う設定
 
 st.markdown("""
 <style>
-
-.rank-wrapper {
-    display: flex;
-    gap: 10px;
-}
-
-.rank-box {
-    flex: 1;
-}
-
-.rank-table {
-    width: 100%;
-    font-size: 12px;
-    border-collapse: collapse;
-}
-
-.rank-table th {
-    text-align: center;
-    border-bottom: 1px solid #666;
-    padding: 4px;
-}
-
-.rank-table td {
-    padding: 3px 6px;
-}
-
-.rank-right {
-    text-align: right;
-}
-
 @media (max-width: 768px) {
-    .rank-table {
-        font-size: 10px;
+
+    .stDataFrame {
+        font-size: 10px !important;
+    }
+
+    .stDataFrame div {
+        font-size: 10px !important;
     }
 }
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -927,68 +901,54 @@ if 'df_log' in locals() and not df_log.empty:
         st.plotly_chart(fig_growth, use_container_width=True, key="growth_treemap_final_v3")
 
         
-        # --- 騰落率ランキング ---
+       # --- 騰落率ランキング ---
         st.markdown("---")
-        st.markdown("## 📈 騰落率ランキング")
+        st.subheader("📈 騰落率ランキング")
 
-        df_gain = top_gainers.copy()
-        df_loss = top_losers.copy()
+        col1, col2 = st.columns(2)
 
-        html_gain = """
-        <table class='rank-table'>
-        <tr>
-        <th>銘柄</th>
-        <th>騰落率</th>
-        <th>増減額</th>
-        </tr>
-        """
+        with col1:
+            st.markdown("### 🟢 値上がり率 TOP10")
 
-        for _, row in df_gain.iterrows():
-            html_gain += f"""
-            <tr>
-                <td>{row['display_name']}</td>
-                <td class='rank-right'>{row['growth_pct']:.2f}%</td>
-                <td class='rank-right'>{int(row['diff_val']):,}</td>
-            </tr>
-            """
+            df_gain = top_gainers.copy()
+            df_gain["growth_pct"] = df_gain["growth_pct"].round(2)
+            df_gain["diff_val"] = (df_gain["diff_val"].astype(int).map(lambda x: f"{x:,}")
+            )
 
-        html_gain += "</table>"
+            st.dataframe(
+                df_gain.rename(columns={
+                    "display_name": "銘柄",
+                    "growth_pct": "騰落率(%)",
+                    "diff_val": "増減額(円)"
+                })[[
+                    "銘柄",
+                    "騰落率(%)",
+                    "増減額(円)"
+                ]]
+                .reset_index(drop=True)
+            )
 
-        html_loss = """
-        <table class='rank-table'>
-        <tr>
-        <th>銘柄</th>
-        <th>騰落率</th>
-        <th>増減額</th>
-        </tr>
-        """
+        with col2:
+            st.markdown("### 🔴 値下がり率 TOP10")
 
-        for _, row in df_loss.iterrows():
-            html_loss += f"""
-            <tr>
-                <td>{row['display_name']}</td>
-                <td class='rank-right'>{row['growth_pct']:.2f}%</td>
-                <td class='rank-right'>{int(row['diff_val']):,}</td>
-            </tr>
-            """
+            df_loss = top_losers.copy()
+            df_loss["growth_pct"] = df_loss["growth_pct"].round(2)
+            df_loss["diff_val"] = (df_loss["diff_val"].astype(int).map(lambda x: f"{x:,}")
+            )
 
-        html_loss += "</table>"
+            st.dataframe(
+                df_loss.rename(columns={
+                    "display_name": "銘柄",
+                    "growth_pct": "騰落率(%)",
+                    "diff_val": "増減額(円)"
+                })[[
+                    "銘柄",
+                    "騰落率(%)",
+                    "増減額(円)"
+                ]]
+                .reset_index(drop=True)
+            )
 
-        st.markdown(f"""
-        <div class="rank-wrapper">
-
-        <div class="rank-box">
-        <h4>🟢 値上がり率 TOP10</h4>
-        {html_gain}
-        </div>
-
-        <div class="rank-box">
-        <h4>🔴 値下がり率 TOP10</h4>
-        {html_loss}
-        </div>
-
-        </div>
-        """, unsafe_allow_html=True)
         
         # --- 増減額ランキング ---
         st.markdown("---")
@@ -1004,7 +964,7 @@ if 'df_log' in locals() and not df_log.empty:
             df_up["diff_val"] = (df_up["diff_val"].astype(int).map(lambda x: f"{x:,}")
             )
 
-            st.table(
+            st.dataframe(
                 df_up.rename(columns={
                     "display_name": "銘柄",
                     "growth_pct": "騰落率(%)",
@@ -1025,7 +985,7 @@ if 'df_log' in locals() and not df_log.empty:
             df_down["diff_val"] = (df_down["diff_val"].astype(int).map(lambda x: f"{x:,}")
             )
 
-            st.table(
+            st.dataframe(
                 df_down.rename(columns={
                     "display_name": "銘柄",
                     "growth_pct": "騰落率(%)",
@@ -1059,7 +1019,7 @@ if 'df_log' in locals() and not df_log.empty:
                 .map(lambda x: f"{x:,}")
             )
 
-            st.table(
+            st.dataframe(
                 sector_display.rename(columns={
                     "sector": "セクター",
                     "growth_pct": "騰落率(%)",
@@ -1088,7 +1048,7 @@ if 'df_log' in locals() and not df_log.empty:
                 .map(lambda x: f"{x:,}")
             )
 
-            st.table(
+            st.dataframe(
                 asset_display.rename(columns={
                     "asset_class": "アセットクラス",
                     "growth_pct": "騰落率(%)",
