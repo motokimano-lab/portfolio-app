@@ -7,7 +7,9 @@ from functions import (
     get_fx,
     get_assets_data_bulk,
     prepare_base_dataframe,
-    save_daily_log_detail
+    save_daily_log_detail,
+    load_daily_log_detail,
+    compare_latest_logs
 )
 
 # --- ① データ読み込み（ここ重要）
@@ -49,17 +51,29 @@ result = save_daily_log_detail(df, creds_dict)
 print(result)
 
 # --- Discord通知 ---
+# ログ読み込み
+df_log = load_daily_log_detail(creds_dict)
+
+# 比較
+compare_result = compare_latest_logs(df_log)
+
+# Discord通知
 webhook_url = os.environ["DISCORD_WEBHOOK_URL"]
 
-total_asset = int(df["value_jpy"].sum())
-total_div = int(df["after_tax_div_jpy"].sum())
+msg = f"""
+📊 Portfolio Update
 
-message = {
-    "content": (
-        f"✅ Auto Save Success\n"
-        f"💰 総資産: {total_asset:,} 円\n"
-        f"📈 税引後配当: {total_div:,} 円"
-    )
-}
+総資産:
+{compare_result['total_end']:,.0f} 円
 
-requests.post(webhook_url, json=message)
+前日比:
+{compare_result['total_diff']:+,.0f} 円
+({compare_result['total_growth']:+.2f}%)
+"""
+
+requests.post(
+    webhook_url,
+    json={"content": msg}
+)
+
+print("Discord notification sent")
