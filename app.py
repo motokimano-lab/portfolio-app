@@ -943,7 +943,7 @@ if 'df_log' in locals() and not df_log.empty:
         </tr>
         """
 
-                for _, row in df_gain.iterrows():
+        for _, row in df_gain.iterrows():
             html_gain += f"""
             <tr>
                 <td>{row['display_name']}</td>
@@ -963,7 +963,7 @@ if 'df_log' in locals() and not df_log.empty:
         </tr>
         """
 
-                for _, row in df_loss.iterrows():
+        for _, row in df_loss.iterrows():
             html_loss += f"""
             <tr>
                 <td>{row['display_name']}</td>
