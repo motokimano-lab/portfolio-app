@@ -1,3 +1,6 @@
+import csv
+from io import StringIO
+
 import pandas as pd
 import streamlit as st
 import yfinance as yf
@@ -20,8 +23,30 @@ import functions
 print(dir(functions))
 
 # ========= 1. データ読み込み =========
-url = "https://docs.google.com/spreadsheets/d/18PLN9uJHxVZCAvAw92piWCniLlQ2i8Z6dT8ok_jycBI/export?format=csv&gid=0"
-df = pd.read_csv(url)
+def load_positions():
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+
+    if "GCP_SERVICE_ACCOUNT" in os.environ:
+        creds_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
+    else:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+    spreadsheet = client.open("portfolio_data")
+    sheet = spreadsheet.worksheet("Positions")
+
+    # CSV読み込みと同じ型推論・空欄処理を維持する。
+    csv_buffer = StringIO()
+    csv.writer(csv_buffer).writerows(sheet.get_all_values())
+    csv_buffer.seek(0)
+    return pd.read_csv(csv_buffer)
+
+
+df = load_positions()
 
 df["ticker"] = df["ticker"].astype(str).str.strip()
 
