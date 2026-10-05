@@ -294,6 +294,9 @@ yield_basis = st.sidebar.radio(
     index=0,
     horizontal=True,
 )
+st.sidebar.caption(
+    "予想はPhase 1では直近配当と支払頻度から年率換算した推計値です。"
+)
 
 annual_div_col = (
     "annual_div_forecast_jpy"
