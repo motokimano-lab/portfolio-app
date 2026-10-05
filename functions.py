@@ -32,23 +32,41 @@ def get_fx(symbol, default, max_retry=5, wait_sec=5):
     return float(default), True
 
 # --- 価格（これだけ使う） ---
-def get_assets_data_bulk(tickers, max_retry=5, wait_sec=5):
+def get_assets_data_bulk(tickers, max_retry=5, wait_sec=5, include_dividend_details=False):
+    """
+    価格・過去365日配当・前日比を一括取得する。
+
+    include_dividend_details=True の場合は、通常の4戻り値に加えて
+    1株あたり過去365日配当、1株あたり予想配当（直近配当の年率換算）、
+    予想値の算出根拠を返す。
+
+    予想配当は会社予想ではなく、直近の支払実績から推計する Phase 1 用の
+    forward run-rate。将来は Dividend_Data シートの手動補正を優先できる設計を想定。
+    """
+    def empty_result():
+        base = ({}, {}, {}, [])
+        if include_dividend_details:
+            return (*base, {}, {}, {})
+        return base
+
     if not tickers:
-        return {}, {}, {}, []
+        return empty_result()
 
     yf_tickers = list(set([
-        str(t).strip().upper() for t in tickers 
+        str(t).strip().upper() for t in tickers
         if t != "CASH" and pd.notna(t)
     ]))
-    
+
     if not yf_tickers:
-        return {}, {}, {}, []
+        return empty_result()
 
     for attempt in range(max_retry):
-
         price_dict = {}
         div_yield_dict = {}
         perf_dict = {}
+        ttm_dividend_dict = {}
+        forecast_dividend_dict = {}
+        forecast_source_dict = {}
         errors = []
 
         try:
@@ -56,7 +74,7 @@ def get_assets_data_bulk(tickers, max_retry=5, wait_sec=5):
                 yf_tickers,
                 period="1y",
                 actions=True,
-                group_by='ticker',
+                group_by="ticker",
                 progress=False
             )
         except Exception:
@@ -65,7 +83,6 @@ def get_assets_data_bulk(tickers, max_retry=5, wait_sec=5):
 
         for t in yf_tickers:
             try:
-                # --- データ取得 ---
                 if data is None:
                     errors.append(t)
                     continue
@@ -81,6 +98,10 @@ def get_assets_data_bulk(tickers, max_retry=5, wait_sec=5):
 
                 df_t = df_t.dropna(subset=["Close"])
 
+                annual_div_total = 0.0
+                forecast_div_total = 0.0
+                forecast_source = "配当なし/未取得"
+
                 # --- fallback ---
                 if df_t.empty:
                     fallback = yf.Ticker(t).history(period="5d")
@@ -89,7 +110,6 @@ def get_assets_data_bulk(tickers, max_retry=5, wait_sec=5):
                         continue
 
                     current_price = float(fallback["Close"].iloc[-1])
-                    annual_div_total = 0
 
                     if len(fallback) >= 2:
                         prev = float(fallback["Close"].iloc[-2])
@@ -111,14 +131,53 @@ def get_assets_data_bulk(tickers, max_retry=5, wait_sec=5):
                     else:
                         perf_dict[t] = (0.0, 0.0)
 
-                    annual_div_total = (
-                        df_t["Dividends"].sum()
-                        if "Dividends" in df_t.columns else 0
-                    )
+                    if "Dividends" in df_t.columns:
+                        dividends_paid = (
+                            pd.to_numeric(df_t["Dividends"], errors="coerce")
+                            .fillna(0)
+                        )
+                        dividends_paid = dividends_paid[dividends_paid > 0]
+                    else:
+                        dividends_paid = pd.Series(dtype=float)
 
-                # --- 格納 ---
+                    annual_div_total = float(dividends_paid.sum())
+
+                    # Phase 1 の予想値:
+                    # 直近1回の配当 × 推定年間支払回数。
+                    # 支払回数は直近の支払間隔から 1/2/4/6/12 回へ丸める。
+                    if not dividends_paid.empty:
+                        latest_dividend = float(dividends_paid.iloc[-1])
+
+                        if len(dividends_paid) >= 2:
+                            intervals = (
+                                dividends_paid.index.to_series()
+                                .diff()
+                                .dt.days
+                                .dropna()
+                            )
+                            median_days = float(intervals.median()) if not intervals.empty else 365.0
+
+                            if median_days <= 45:
+                                payments_per_year = 12
+                            elif median_days <= 75:
+                                payments_per_year = 6
+                            elif median_days <= 120:
+                                payments_per_year = 4
+                            elif median_days <= 220:
+                                payments_per_year = 2
+                            else:
+                                payments_per_year = 1
+                        else:
+                            payments_per_year = 1
+
+                        forecast_div_total = latest_dividend * payments_per_year
+                        forecast_source = f"直近配当×{payments_per_year}回/年（推計）"
+
                 for key in [t.upper(), t.lower()]:
                     price_dict[key] = current_price
+                    ttm_dividend_dict[key] = annual_div_total
+                    forecast_dividend_dict[key] = forecast_div_total
+                    forecast_source_dict[key] = forecast_source
                     div_yield_dict[key] = (
                         annual_div_total / current_price
                         if current_price > 0 else 0.0
@@ -130,19 +189,34 @@ def get_assets_data_bulk(tickers, max_retry=5, wait_sec=5):
                 errors.append(t)
                 continue
 
-        # --- 成功判定 ---
+        errors = list(dict.fromkeys(errors))
+
         if not errors and all(
             (v is not None and v > 0) for v in price_dict.values()
         ):
-            return price_dict, div_yield_dict, perf_dict, errors
+            base = (price_dict, div_yield_dict, perf_dict, errors)
+            if include_dividend_details:
+                return (
+                    *base,
+                    ttm_dividend_dict,
+                    forecast_dividend_dict,
+                    forecast_source_dict
+                )
+            return base
 
         print(f"[RETRY] attempt {attempt+1} failed. errors={errors}")
-
         time.sleep(wait_sec)
 
-    # 最終的にダメでも返す
-    return price_dict, div_yield_dict, perf_dict, errors
-    
+    base = (price_dict, div_yield_dict, perf_dict, errors)
+    if include_dividend_details:
+        return (
+            *base,
+            ttm_dividend_dict,
+            forecast_dividend_dict,
+            forecast_source_dict
+        )
+    return base
+
 # --- DataFrame整形 ---
 def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
     df = df.copy()
