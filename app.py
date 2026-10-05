@@ -84,12 +84,25 @@ import time
 def load_prices(tickers):
     return get_prices_bulk(tickers)
 
+PROXY_ETF_TICKERS = {"VOO", "SCHD"}
+
 def calc_after_tax_dividend(row):
-    annual_div_jpy = row["annual_div_jpy"]
-    ticker = row["ticker"]
-    acc_type = row["account_type"]
-    currency = row["currency"]
-    if annual_div_jpy == 0 or ticker == "VOO": return 0
+    """
+    画面表示用の税引後参考額。
+    VOO/SCHD は実保有が日本の投資信託で、ETFは価格・配当の換算指標として
+    使っているため、米国ETFの10%源泉を重ねず、日本側の口座課税だけで概算する。
+    """
+    annual_div_jpy = float(row.get("annual_div_jpy", 0) or 0)
+    ticker = str(row.get("ticker", "")).upper()
+    acc_type = row.get("account_type", "")
+    currency = row.get("currency", "")
+
+    if annual_div_jpy == 0:
+        return 0
+
+    if ticker in PROXY_ETF_TICKERS:
+        return annual_div_jpy if acc_type == "NISA" else annual_div_jpy * (1 - 0.20315)
+
     if currency == "USD" and acc_type == "特定":
         return annual_div_jpy * 0.90 * (1 - 0.20315)
     if currency == "USD" and acc_type == "NISA":
@@ -138,16 +151,29 @@ df["ticker"] = df["ticker"].astype(str).str.strip()
 all_tickers = df["ticker"].unique()
 
 # 一括取得関数を1回だけ呼ぶ
-price_dict, div_yield_dict, perf_dict, price_errors = get_assets_data_bulk(all_tickers)
+(
+    price_dict,
+    div_yield_dict,
+    perf_dict,
+    price_errors,
+    ttm_dividend_dict,
+    forecast_dividend_dict,
+    forecast_source_dict,
+) = get_assets_data_bulk(all_tickers, include_dividend_details=True)
 
 # 現金データの定義
 price_dict["CASH"] = 1.0
 div_yield_dict["CASH"] = 0.0
 perf_dict["CASH"] = (0.0, 0.0)
+ttm_dividend_dict["CASH"] = 0.0
+forecast_dividend_dict["CASH"] = 0.0
+forecast_source_dict["CASH"] = "配当なし"
 
 # 各列へのマッピング
 df["price"] = df["ticker"].map(lambda x: price_dict.get(x))
-df["div_yield"] = df["ticker"].map(lambda x: div_yield_dict.get(x, 0.0))
+df["dividend_ttm_per_share"] = df["ticker"].map(lambda x: ttm_dividend_dict.get(x, 0.0))
+df["dividend_forecast_per_share"] = df["ticker"].map(lambda x: forecast_dividend_dict.get(x, 0.0))
+df["dividend_forecast_source"] = df["ticker"].map(lambda x: forecast_source_dict.get(x, "未取得"))
 df["day_diff_val"] = df["ticker"].map(lambda x: perf_dict.get(x, (0.0, 0.0))[0])
 df["day_diff_pct"] = df["ticker"].map(lambda x: perf_dict.get(x, (0.0, 0.0))[1])
 
@@ -192,11 +218,52 @@ if st.query_params.get("auto_save") == "1":
 
     st.stop()
 
-# 年間配当金の計算 (評価額 * 過去1年実績の利回り)
-df["annual_div_jpy"] = df["value_jpy"] * df["div_yield"]
+# --- 配当計算（実績 / 予想を別々に保持） ---
+def _fx_to_jpy(row):
+    if row["currency"] == "USD":
+        return usd_jpy
+    if row["currency"] == "VND":
+        return vnd_jpy
+    return 1.0
 
-# --- 配当計算---
-df["after_tax_div_jpy"] = df.apply(calc_after_tax_dividend, axis=1)
+df["fx_to_jpy"] = df.apply(_fx_to_jpy, axis=1)
+df["cost_basis_jpy"] = (
+    pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
+    * pd.to_numeric(df["cost_price"], errors="coerce").fillna(0)
+    * df["fx_to_jpy"]
+)
+
+df["annual_div_ttm_jpy"] = (
+    pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
+    * pd.to_numeric(df["dividend_ttm_per_share"], errors="coerce").fillna(0)
+    * df["fx_to_jpy"]
+)
+df["annual_div_forecast_jpy"] = (
+    pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
+    * pd.to_numeric(df["dividend_forecast_per_share"], errors="coerce").fillna(0)
+    * df["fx_to_jpy"]
+)
+
+df["div_yield_ttm_current"] = df.apply(
+    lambda r: (r["dividend_ttm_per_share"] / r["price"])
+    if pd.notna(r["price"]) and r["price"] > 0 else 0.0,
+    axis=1,
+)
+df["div_yield_forecast_current"] = df.apply(
+    lambda r: (r["dividend_forecast_per_share"] / r["price"])
+    if pd.notna(r["price"]) and r["price"] > 0 else 0.0,
+    axis=1,
+)
+df["div_yield_ttm_cost"] = df.apply(
+    lambda r: (r["dividend_ttm_per_share"] / r["cost_price"])
+    if pd.notna(r["cost_price"]) and r["cost_price"] > 0 else 0.0,
+    axis=1,
+)
+df["div_yield_forecast_cost"] = df.apply(
+    lambda r: (r["dividend_forecast_per_share"] / r["cost_price"])
+    if pd.notna(r["cost_price"]) and r["cost_price"] > 0 else 0.0,
+    axis=1,
+)
 
 # 損益・パフォーマンス
 df["profit_pct"] = df.apply(lambda r: 0 if r["ticker"] == "CASH" else (r["price"] - r["cost_price"]) / r["cost_price"] * 100, axis=1)
@@ -213,6 +280,43 @@ selected_owners = st.sidebar.multiselect("名義を選択", all_owners, default=
 
 all_accounts = df["account_type"].unique().tolist()
 selected_accounts = st.sidebar.multiselect("口座種別を選択", all_accounts, default=all_accounts)
+
+st.sidebar.header("💰 配当表示")
+dividend_basis = st.sidebar.radio(
+    "配当基準",
+    ["予想", "過去365日実績"],
+    index=0,
+    horizontal=True,
+)
+yield_basis = st.sidebar.radio(
+    "利回り基準",
+    ["現在株価ベース", "取得価格ベース"],
+    index=0,
+    horizontal=True,
+)
+
+annual_div_col = (
+    "annual_div_forecast_jpy"
+    if dividend_basis == "予想"
+    else "annual_div_ttm_jpy"
+)
+if dividend_basis == "予想":
+    selected_yield_col = (
+        "div_yield_forecast_current"
+        if yield_basis == "現在株価ベース"
+        else "div_yield_forecast_cost"
+    )
+else:
+    selected_yield_col = (
+        "div_yield_ttm_current"
+        if yield_basis == "現在株価ベース"
+        else "div_yield_ttm_cost"
+    )
+
+# 既存表示ロジックとの互換用エイリアス
+df["annual_div_jpy"] = df[annual_div_col]
+df["div_yield"] = df[selected_yield_col]
+df["after_tax_div_jpy"] = df.apply(calc_after_tax_dividend, axis=1)
 
 st.sidebar.header("📡 データ取得状態")
 
@@ -280,7 +384,7 @@ if st.sidebar.button("最新データを再取得"):
 mask = df["account_type"].isin(selected_accounts)
 if "owner" in df.columns:
     mask = mask & (df["owner"].isin(selected_owners))
-df_filtered = df[mask]
+df_filtered = df[mask].copy()
 
 # 資産ツリーマップの色設定
 st.sidebar.header("🎨 表示設定")
@@ -544,14 +648,32 @@ with col_p3:
     st.plotly_chart(fig3, use_container_width=True)
 
 # --- (5) 年間配当金額 ---
-total_div_pre = df_filtered[df_filtered["ticker"] != "VOO"]["annual_div_jpy"].sum()
+total_div_pre = df_filtered["annual_div_jpy"].sum()
 total_div_post = df_filtered["after_tax_div_jpy"].sum()
+total_div_ttm_pre = df_filtered["annual_div_ttm_jpy"].sum()
+total_div_forecast_pre = df_filtered["annual_div_forecast_jpy"].sum()
+forecast_vs_ttm = total_div_forecast_pre - total_div_ttm_pre
+forecast_vs_ttm_pct = (
+    forecast_vs_ttm / total_div_ttm_pre * 100
+    if total_div_ttm_pre != 0 else 0
+)
+
 st.markdown("---")
 st.header("💰 Dividend Summary")
-d1, d2, d3 = st.columns(3)
+st.caption(f"配当基準: {dividend_basis} ／ 利回り基準: {yield_basis}")
+d1, d2, d3, d4 = st.columns(4)
 d1.metric("年間配当（税引前）", f"{total_div_pre:,.0f} 円")
-d2.metric("年間配当（税引後）", f"{total_div_post:,.0f} 円")
-d3.metric("月平均（税引後）", f"{(total_div_post/12):,.0f} 円")
+d2.metric("年間配当（税引後・参考）", f"{total_div_post:,.0f} 円")
+d3.metric("月平均（税引後・参考）", f"{(total_div_post/12):,.0f} 円")
+d4.metric(
+    "予想－過去365日",
+    f"{forecast_vs_ttm:+,.0f} 円",
+    f"{forecast_vs_ttm_pct:+.1f}%"
+)
+st.caption(
+    "※ VOO・SCHDは実保有の投資信託を対応ETFで換算した参考値です。"
+    "税引後額は実際のファンド分配・課税と一致しない場合があります。"
+)
 
 print("df columns:", df.columns)
 print("df_filtered columns:", df_filtered.columns)
@@ -565,11 +687,30 @@ import plotly.graph_objects as go
 df_div_map = df_filtered.copy()
 df_div_map['sector_group'] = df_div_map['sector_group'].replace(['', ' ', 'nan', 'None', '未分類'], np.nan)
 
-# 銘柄単位で集計（配当額は合計、利回りは平均をとる）
-df_div_grouped = df_div_map.groupby(['asset_class', 'sector_group', 'display_name'], dropna=False).agg({
+# 銘柄単位で集計。
+# 利回りは単純平均ではなく、現在評価額または取得総額で加重して算出する。
+df_div_map["yield_base_jpy"] = (
+    df_div_map["value_jpy"]
+    if yield_basis == "現在株価ベース"
+    else df_div_map["cost_basis_jpy"]
+)
+
+df_div_grouped = df_div_map.groupby(
+    ['asset_class', 'sector_group', 'display_name'],
+    dropna=False
+).agg({
+    'annual_div_jpy': 'sum',
     'after_tax_div_jpy': 'sum',
-    'div_yield': 'mean'
+    'yield_base_jpy': 'sum'
 }).reset_index()
+
+df_div_grouped["display_div_yield"] = df_div_grouped.apply(
+    lambda r: (
+        r["annual_div_jpy"] / r["yield_base_jpy"]
+        if r["yield_base_jpy"] > 0 else 0.0
+    ),
+    axis=1
+)
 
 # 色の定義
 div_colors = [[0.0, "rgb(192, 0, 0)"], [0.5, "rgb(64, 64, 64)"], [1.0, "rgb(0, 128, 0)"]]
@@ -579,15 +720,15 @@ d_ids, d_parents, d_labels, d_values, d_colors = [], [], [], [], []
 
 # (A) ルート
 d_root_id = "Div_Root"
-d_ids.append(d_root_id); d_parents.append(""); d_labels.append(f"年間配当（税引後）: {total_div_post:,.0f} 円")
+d_ids.append(d_root_id); d_parents.append(""); d_labels.append(f"{dividend_basis} 年間配当（税引後参考）: {total_div_post:,.0f} 円")
 d_values.append(0) 
-d_colors.append(df_div_grouped['div_yield'].mean() if not df_div_grouped.empty else 0)
+d_colors.append(df_div_grouped['display_div_yield'].mean() if not df_div_grouped.empty else 0)
 
 # (B) 資産クラス
 for ac in df_div_grouped["asset_class"].unique():
     d_ids.append(ac); d_parents.append(d_root_id); d_labels.append(ac)
     d_values.append(0)
-    d_colors.append(df_div_grouped[df_div_grouped["asset_class"] == ac]['div_yield'].mean())
+    d_colors.append(df_div_grouped[df_div_grouped["asset_class"] == ac]['display_div_yield'].mean())
 
 # (C) セクター
 df_div_sectors = df_div_grouped[df_div_grouped["sector_group"].notna()]
@@ -595,7 +736,7 @@ for (ac, sector), group in df_div_sectors.groupby(["asset_class", "sector_group"
     d_sector_id = f"DivSect-{ac}-{sector}"
     d_ids.append(d_sector_id); d_parents.append(ac); d_labels.append(sector)
     d_values.append(0)
-    d_colors.append(group['div_yield'].mean())
+    d_colors.append(group['display_div_yield'].mean())
 
 # (D) 銘柄
 for _, row in df_div_grouped.iterrows():
@@ -608,7 +749,7 @@ for _, row in df_div_grouped.iterrows():
     
     d_ids.append(d_unique_id); d_parents.append(d_parent_id); d_labels.append(ticker)
     d_values.append(row['after_tax_div_jpy']) # サイズは年間配当額
-    d_colors.append(row['div_yield'])      # 色は利回り
+    d_colors.append(row['display_div_yield'])      # 色は選択した利回り
 
 # 3. 描画
 fig_div = go.Figure(go.Treemap(
@@ -622,10 +763,10 @@ fig_div = go.Figure(go.Treemap(
         cmid=0.025, # 2.5%を基準色にする
         cmin=0,
         cmax=0.05,
-        colorbar=dict(title="利回り", tickformat=".1%"),
+        colorbar=dict(title=yield_basis, tickformat=".1%"),
         line=dict(width=1, color="black")
     ),
-    hovertemplate="<b>%{label}</b><br>年間配当: %{value:,.0f}円<br>利回り: %{color:.2%}<extra></extra>",
+    hovertemplate=f"<b>%{{label}}</b><br>年間配当: %{{value:,.0f}}円<br>{yield_basis}: %{{color:.2%}}<extra></extra>",
     texttemplate="<b>%{label}</b><br>%{value:,.0f}円",
 ))
 
@@ -640,15 +781,8 @@ st.plotly_chart(fig_div, use_container_width=True, key="dividend_tree_new")
 # --- (3') 配当構成比率（帯グラフ：列作成・順序固定版） ---
 import plotly.express as px
 
-# ✅ 1. 税引後配当の列がなければ、その場で作ってしまう（KeyError対策）
-# 資産ツリー等で使ったロジック（例：0.8掛け）に合わせて計算してください
-if 'annual_div_post' not in df_filtered.columns:
-    # もし既存の annual_div_jpy から計算する場合（一例です）
-    # 日本株は20.315%引く、などの細かい判定が面倒なら、
-    # シンプルに既存の計算済み変数やロジックをここに適用します。
-    df_filtered['annual_div_post'] = df_filtered['annual_div_jpy'] * 0.79685 # 簡易的な税引後計算
-
-div_col = 'annual_div_post'
+# Dividend Summary と同じ税引後参考額を使う
+div_col = 'after_tax_div_jpy'
 df_div_share = df_filtered[df_filtered[div_col] > 0].copy()
 
 if not df_div_share.empty:
@@ -771,7 +905,33 @@ st.markdown("---")
 
 # --- (6) 配当金の表 ---
 st.subheader("📈 銘柄別配当データ")
-st.dataframe(df_filtered[["ticker", "display_name", "div_yield", "annual_div_jpy", "after_tax_div_jpy"]].style.format({"div_yield": "{:.2%}", "annual_div_jpy": "{:,.0f}", "after_tax_div_jpy": "{:,.0f}"}))
+df_div_table = df_filtered[[
+    "ticker",
+    "display_name",
+    "div_yield",
+    "annual_div_jpy",
+    "after_tax_div_jpy",
+    "dividend_ttm_per_share",
+    "dividend_forecast_per_share",
+    "dividend_forecast_source",
+]].copy()
+df_div_table = df_div_table.rename(columns={
+    "div_yield": f"{yield_basis}利回り",
+    "annual_div_jpy": f"年間配当（{dividend_basis}・税引前）",
+    "after_tax_div_jpy": f"年間配当（{dividend_basis}・税引後参考）",
+    "dividend_ttm_per_share": "1株配当（過去365日）",
+    "dividend_forecast_per_share": "1株配当（予想）",
+    "dividend_forecast_source": "予想根拠",
+})
+st.dataframe(
+    df_div_table.style.format({
+        f"{yield_basis}利回り": "{:.2%}",
+        f"年間配当（{dividend_basis}・税引前）": "{:,.0f}",
+        f"年間配当（{dividend_basis}・税引後参考）": "{:,.0f}",
+        "1株配当（過去365日）": "{:,.4f}",
+        "1株配当（予想）": "{:,.4f}",
+    })
+)
 
 
 
