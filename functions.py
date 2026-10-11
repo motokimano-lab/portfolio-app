@@ -32,6 +32,52 @@ def get_fx(symbol, default, max_retry=5, wait_sec=5):
     return float(default), True
 
 # --- 価格（これだけ使う） ---
+def _dividends_on_current_share_basis(history):
+    """Normalize unadjusted Yahoo dividends without dividing adjusted ones twice.
+
+    Yahoo normally adjusts older dividends, but can leave a dividend on a
+    split date in old units. Try cumulative later split ratios (including the
+    ex-date itself), and require substantially better agreement with the
+    ex-dividend price drop before changing a value. Ambiguous events stay as
+    supplied; price movement alone cannot prove the basis of every dividend.
+    Close/Open here must be split-adjusted, NOT dividend-adjusted prices.
+    """
+    history = history.sort_index()
+    dividends = pd.to_numeric(history["Dividends"], errors="coerce").fillna(0)
+    dividends = dividends[dividends > 0].copy()
+    if "Stock Splits" not in history.columns:
+        return dividends
+    splits = pd.to_numeric(history["Stock Splits"], errors="coerce").fillna(0)
+    splits = splits[(splits > 0) & (splits != 1)]
+    for date, dividend in dividends.items():
+        later_splits = splits.loc[splits.index >= date]
+        if later_splits.empty:
+            continue
+        position = history.index.get_loc(date)
+        if position == 0:
+            continue
+        previous_close = float(history["Close"].iloc[position - 1])
+        event_open = float(history.get("Open", history["Close"]).iloc[position])
+        drop = previous_close - event_open
+        if not pd.notna(drop) or drop <= 0:
+            continue
+        # Suffix products also cover partially adjusted histories and reverse
+        # splits. No ticker names or fixed split ratios are involved.
+        candidates = [float(dividend)]
+        cumulative_ratio = 1.0
+        for ratio in reversed(later_splits.tolist()):
+            cumulative_ratio *= float(ratio)
+            candidates.append(float(dividend) / cumulative_ratio)
+        corrected = min(candidates, key=lambda value: abs(value - drop))
+        original_error = abs(float(dividend) - drop)
+        corrected_error = abs(corrected - drop)
+        if (corrected != dividend
+                and corrected_error * 5 < original_error
+                and corrected_error <= corrected):
+            dividends.loc[date] = corrected
+    return dividends
+
+
 def get_assets_data_bulk(tickers, max_retry=5, wait_sec=5, include_dividend_details=False):
     """
     価格・過去365日配当・前日比を一括取得する。
@@ -137,6 +183,32 @@ def get_assets_data_bulk(tickers, max_retry=5, wait_sec=5, include_dividend_deta
                             .fillna(0)
                         )
                         dividends_paid = dividends_paid[dividends_paid > 0]
+                        split_events = (
+                            pd.to_numeric(df_t["Stock Splits"], errors="coerce")
+                            .fillna(0)
+                            if "Stock Splits" in df_t.columns
+                            else pd.Series(dtype=float)
+                        )
+                        if ((split_events > 0) & (split_events != 1)).any():
+                            # Separate unadjusted OHLC for the basis check only.
+                            # Keep the original download's prices/performance.
+                            event_history = yf.Ticker(t).history(
+                                start=df_t.index.min().date(),
+                                end=(df_t.index.max() + pd.Timedelta(days=1)).date(),
+                                auto_adjust=False,
+                                actions=True,
+                            )
+                            if event_history.empty:
+                                raise ValueError("split/dividend verification data unavailable")
+                            normalized = _dividends_on_current_share_basis(event_history)
+                            # Match local trading dates across timezone-aware
+                            # history and timezone-naive bulk-download indexes.
+                            by_date = {d.date(): v for d, v in normalized.items()}
+                            dividends_paid = pd.Series(
+                                [by_date.get(d.date(), v) for d, v in dividends_paid.items()],
+                                index=dividends_paid.index,
+                                dtype=float,
+                            )
                     else:
                         dividends_paid = pd.Series(dtype=float)
 
