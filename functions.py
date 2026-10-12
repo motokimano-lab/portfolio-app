@@ -33,48 +33,64 @@ def get_fx(symbol, default, max_retry=5, wait_sec=5):
 
 # --- 価格（これだけ使う） ---
 def _dividends_on_current_share_basis(history):
-    """Normalize unadjusted Yahoo dividends without dividing adjusted ones twice.
+    """Split candidates supported by price gaps or adjacent dividends.
 
-    Yahoo normally adjusts older dividends, but can leave a dividend on a
-    split date in old units. Try cumulative later split ratios (including the
-    ex-date itself), and require substantially better agreement with the
-    ex-dividend price drop before changing a value. Ambiguous events stay as
-    supplied; price movement alone cannot prove the basis of every dividend.
-    Close/Open here must be split-adjusted, NOT dividend-adjusted prices.
+    Try cumulative split ratios, including same-day and reverse splits.
+    Adjacent dividends can support a correction or veto double adjustment.
+    Keep ambiguous events unchanged; both signals are heuristics.
+    Close/Open must be split-adjusted, not dividend-adjusted prices.
     """
     history = history.sort_index()
-    dividends = pd.to_numeric(history["Dividends"], errors="coerce").fillna(0)
+    dividends = pd.to_numeric(history['Dividends'], errors='coerce').fillna(0)
     dividends = dividends[dividends > 0].copy()
-    if "Stock Splits" not in history.columns:
+    if 'Stock Splits' not in history.columns:
         return dividends
-    splits = pd.to_numeric(history["Stock Splits"], errors="coerce").fillna(0)
+    splits = pd.to_numeric(history['Stock Splits'], errors='coerce').fillna(0)
     splits = splits[(splits > 0) & (splits != 1)]
-    for date, dividend in dividends.items():
-        later_splits = splits.loc[splits.index >= date]
-        if later_splits.empty:
+    original = dividends.copy()
+    for ordinal, (date, dividend) in enumerate(original.items()):
+        later = splits.loc[splits.index >= date]
+        if later.empty:
             continue
-        position = history.index.get_loc(date)
-        if position == 0:
-            continue
-        previous_close = float(history["Close"].iloc[position - 1])
-        event_open = float(history.get("Open", history["Close"]).iloc[position])
-        drop = previous_close - event_open
-        if not pd.notna(drop) or drop <= 0:
-            continue
-        # Suffix products also cover partially adjusted histories and reverse
-        # splits. No ticker names or fixed split ratios are involved.
         candidates = [float(dividend)]
-        cumulative_ratio = 1.0
-        for ratio in reversed(later_splits.tolist()):
-            cumulative_ratio *= float(ratio)
-            candidates.append(float(dividend) / cumulative_ratio)
-        corrected = min(candidates, key=lambda value: abs(value - drop))
-        original_error = abs(float(dividend) - drop)
-        corrected_error = abs(corrected - drop)
-        if (corrected != dividend
-                and corrected_error * 5 < original_error
-                and corrected_error <= corrected):
-            dividends.loc[date] = corrected
+        ratio = 1.0
+        for split in reversed(later.tolist()):
+            ratio *= float(split)
+            candidates.append(float(dividend) / ratio)
+        references = []
+        if ordinal > 0:
+            references.append(float(dividends.iloc[ordinal - 1]))
+        if ordinal + 1 < len(original):
+            references.append(float(original.iloc[ordinal + 1]))
+        position = history.index.get_loc(date)
+        drop = float('nan')
+        if position > 0:
+            drop = float(history['Close'].iloc[position - 1]) - float(
+                history.get('Open', history['Close']).iloc[position])
+        supported = []
+        for candidate in candidates[1:]:
+            price_support = (pd.notna(drop) and drop > 0
+                and abs(candidate - drop)*5 < abs(dividend - drop)
+                and abs(candidate - drop) <= candidate)
+            continuity_support = any(
+                abs(candidate - reference)/reference <= 0.25
+                and abs(candidate - reference)*5 < abs(dividend - reference)
+                for reference in references)
+            # A neighboring dividend that already agrees with the raw value
+            # is evidence against a second split adjustment.
+            continuity_conflict = any(
+                abs(dividend - reference)/reference <= 0.25
+                and abs(candidate - reference)/reference > 0.25
+                for reference in references)
+            if (price_support or continuity_support) and not continuity_conflict:
+                supported.append(candidate)
+        if supported:
+            def evidence_error(candidate):
+                continuity_error = min((abs(candidate-r)/r for r in references),
+                                       default=float('inf'))
+                price_error = abs(candidate-drop)/candidate if pd.notna(drop) and drop > 0 else float('inf')
+                return min(continuity_error, price_error)
+            dividends.loc[date] = min(supported, key=evidence_error)
     return dividends
 
 
