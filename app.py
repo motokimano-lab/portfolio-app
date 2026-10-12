@@ -768,7 +768,7 @@ fig_div = go.Figure(go.Treemap(
         cmax=0.05,
         colorbar=dict(
             tickformat=".0%",
-            orientation="h", x=1, xanchor="right", y=-0.025, yanchor="top",
+            orientation="h", x=1, xanchor="right", y=0.005, yanchor="top",
             len=0.42, thickness=12, outlinewidth=0, tickfont=dict(size=10),
             tickmode="array", tickvals=[0, 0.01, 0.02, 0.03, 0.04, 0.05],
         ),
