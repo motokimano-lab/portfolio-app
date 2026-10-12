@@ -6,6 +6,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from dividend_tax import normalize_account_type
 
 # --- 為替 ---
 import time
@@ -149,14 +150,17 @@ def get_assets_data_bulk(tickers, max_retry=5, wait_sec=5, include_dividend_deta
                     errors.append(t)
                     continue
 
-                if len(yf_tickers) == 1:
-                    df_t = data
-                else:
-                    if t in data.columns.levels[0]:
+                if isinstance(data.columns, pd.MultiIndex):
+                    if t in data.columns.get_level_values(0):
                         df_t = data[t]
                     else:
                         errors.append(t)
                         continue
+                elif len(yf_tickers) == 1:
+                    df_t = data
+                else:
+                    errors.append(t)
+                    continue
 
                 df_t = df_t.dropna(subset=["Close"])
 
@@ -306,14 +310,83 @@ def get_assets_data_bulk(tickers, max_retry=5, wait_sec=5, include_dividend_deta
     return base
 
 # --- DataFrame整形 ---
-def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
+def normalize_positions(df):
+    """Optional native-fund columns; legacy rows retain unit=1 and all values."""
+    from mutual_funds import FUND_SPECS
+
     df = df.copy()
+    for column in ["instrument_type", "fund_code", "product_name"]:
+        if column not in df.columns:
+            df[column] = ""
+        df[column] = df[column].fillna("").astype(str).str.strip()
+    if "account_type" in df.columns:
+        df["account_type"] = df["account_type"].fillna("").map(normalize_account_type)
+    df["instrument_type"] = df["instrument_type"].str.lower()
+    native = df["instrument_type"].eq("mutual_fund")
+    if "price_unit" not in df.columns:
+        df["price_unit"] = float("nan")
+    df["price_unit"] = pd.to_numeric(df["price_unit"], errors="coerce")
+    df.loc[~native, "price_unit"] = 1.0
+    df.loc[native, "price_unit"] = df.loc[native, "price_unit"].fillna(10000)
+    if (df.loc[native, "price_unit"] != 10000).any():
+        raise ValueError("投資信託のprice_unitは10000で指定してください")
+    if df.loc[native, "fund_code"].eq("").any():
+        raise ValueError("投資信託のfund_codeが未入力です")
+    if (~df.loc[native, "currency"].fillna("JPY").isin(["JPY", ""])).any():
+        raise ValueError("投資信託のcurrencyはJPYで指定してください")
+    df.loc[native, "currency"] = "JPY"
+    df.loc[native, "ticker"] = "MF:" + df.loc[native, "fund_code"]
+    # Model attributes come from the official product registry, never ticker guesses.
+    df["foreign_tax_adjustment"] = False
+    df["underlying_foreign_tax_rate"] = 0.0
+    for code, spec in FUND_SPECS.items():
+        selected = native & df["fund_code"].eq(code)
+        df.loc[selected, "product_name"] = spec["product_name"]
+        df.loc[selected, "display_name"] = spec["display_name"]
+        df.loc[selected, "foreign_tax_adjustment"] = spec.get("foreign_tax_adjustment", False)
+        df.loc[selected, "underlying_foreign_tax_rate"] = spec.get("underlying_foreign_tax_rate", 0.0)
+    return df
+
+
+def get_position_assets_data(df, include_dividend_details=False, now=None):
+    """Keep the old tuple API plus native-fund status; no MF goes to Yahoo."""
+    from mutual_funds import get_mutual_fund_data
+
+    df = normalize_positions(df)
+    native = df["instrument_type"].eq("mutual_fund")
+    legacy = df.loc[~native, "ticker"].unique().tolist()
+    data = get_assets_data_bulk(legacy, include_dividend_details=True)
+    price, yields, perf, errors, ttm, forecast, sources = data
+    status = {}
+    for code in df.loc[native, "fund_code"].unique():
+        record = get_mutual_fund_data(code, now=now)
+        ticker = "MF:" + code
+        status[ticker] = record
+        if not record["success"]:
+            errors.append(ticker)
+            price[ticker] = float("nan")
+            ttm[ticker] = forecast[ticker] = float("nan")
+            continue
+        price[ticker] = record["price"]
+        ttm[ticker] = record["ttm_distribution"]
+        forecast[ticker] = record["forecast_distribution"]
+        yields[ticker] = ttm[ticker] / price[ticker]
+        perf[ticker] = (record["previous_change"], record["previous_change_pct"])
+        sources[ticker] = record["forecast_source"]
+    result = (price, yields, perf, list(dict.fromkeys(errors)))
+    if include_dividend_details:
+        result = (*result, ttm, forecast, sources)
+    return result, status
+
+
+def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
+    df = normalize_positions(df)
 
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
     df["price"] = pd.to_numeric(df["price"], errors="coerce")
     df["cost_price"] = pd.to_numeric(df["cost_price"], errors="coerce")
 
-    df["value"] = df["price"] * df["quantity"]
+    df["value"] = df["price"] * df["quantity"] / df["price_unit"]
 
     def convert_to_jpy(row):
         if row["currency"] == "USD":
@@ -323,6 +396,10 @@ def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
         return row["value"]
 
     df["value_jpy"] = df.apply(convert_to_jpy, axis=1)
+    df["fx_to_jpy"] = df["currency"].map(
+        lambda currency: usd_jpy if currency == "USD" else vnd_jpy if currency == "VND" else 1.0
+    )
+    df["cost_basis_jpy"] = df["quantity"] / df["price_unit"] * df["cost_price"] * df["fx_to_jpy"]
 
     df["sector_group"] = df["sector"].fillna("未分類")
 
@@ -378,6 +455,27 @@ def save_daily_log_detail(df, creds_dict):
     sheet.update(filtered_data + rows)
 
     return f"{len(rows)} rows saved (overwrite mode)"
+
+def daily_log_migration_names(df_log, start_date, end_date):
+    """Find ETF-proxy -> native-fund changes across successive logged dates."""
+    log = df_log.copy()
+    log["date"] = pd.to_datetime(log["date"]).dt.date
+    start_date = pd.Timestamp(start_date).date()
+    end_date = pd.Timestamp(end_date).date()
+    dates = sorted(log["date"].unique())
+    affected = set()
+    for previous, current in zip(dates, dates[1:]):
+        if not start_date < current <= end_date:
+            continue
+        before = log.loc[log["date"].eq(previous)]
+        after = log.loc[log["date"].eq(current)]
+        for proxy, name in [("VOO", "SP500"), ("SCHD", "SCHD")]:
+            old = before.loc[before["display_name"].eq(name), "ticker"].astype(str)
+            new = after.loc[after["display_name"].eq(name), "ticker"].astype(str)
+            if old.eq(proxy).any() and new.str.startswith("MF:").sum() > old.str.startswith("MF:").sum():
+                affected.add(name)
+    return sorted(affected)
+
 
 def compare_portfolio(df_log, start_date, end_date):
 
@@ -442,6 +540,11 @@ def compare_portfolio(df_log, start_date, end_date):
         .round(2)
     )
 
+    migration_names = daily_log_migration_names(df_log, start_date, end_date)
+    d_merged["valuation_method_change"] = d_merged["display_name"].isin(migration_names)
+    d_merged.loc[d_merged["valuation_method_change"], "growth_pct"] = float("nan")
+    ranking = d_merged.loc[~d_merged["valuation_method_change"]]
+
     # summary
     total_end = d_merged["value_jpy_end"].sum()
     total_start = d_merged["value_jpy_start"].sum()
@@ -458,7 +561,7 @@ def compare_portfolio(df_log, start_date, end_date):
 
 # 値上がり率TOP10
     top_gainers = (
-        d_merged
+        ranking
         .sort_values("growth_pct", ascending=False)
         .head(10)
         [[
@@ -470,7 +573,7 @@ def compare_portfolio(df_log, start_date, end_date):
 
 # 値下がり率TOP10
     top_losers = (
-        d_merged
+        ranking
         .sort_values("growth_pct", ascending=True)
         .head(10)
         [[
@@ -482,7 +585,7 @@ def compare_portfolio(df_log, start_date, end_date):
 
 # 金額増加TOP10
     top_diff_up = (
-        d_merged
+        ranking
         .sort_values("diff_val", ascending=False)
         .head(10)
         [[
@@ -494,7 +597,7 @@ def compare_portfolio(df_log, start_date, end_date):
 
 # 金額減少TOP10
     top_diff_down = (
-        d_merged
+        ranking
         .sort_values("diff_val", ascending=True)
         .head(10)
         [[
@@ -568,6 +671,7 @@ def compare_portfolio(df_log, start_date, end_date):
 
 # --- 各種ランキングまとめ ---    
     summary = {
+        "migration_names": migration_names,
         "total_start": total_start,
         "total_end": total_end,
         "total_diff": total_diff,
@@ -658,8 +762,11 @@ def compare_latest_logs(df_log):
         else 0
     )
 
+    migration_names = daily_log_migration_names(df_log, start_date, end_date)
+    d_merged["valuation_method_change"] = d_merged["display_name"].isin(migration_names)
+    d_merged.loc[d_merged["valuation_method_change"], "growth_pct"] = float("nan")
     ranking_df = d_merged[
-        d_merged["diff_val"].abs() > 1
+        (d_merged["diff_val"].abs() > 1) & ~d_merged["valuation_method_change"]
     ].copy()
     
     gainers_df = ranking_df[
@@ -687,6 +794,7 @@ def compare_latest_logs(df_log):
     )
 
     return {
+        "migration_names": migration_names,
         "start_date": start_date,
         "end_date": end_date,
         "total_start": total_start,

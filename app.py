@@ -15,7 +15,8 @@ from functions import (
     get_fx,
     prepare_base_dataframe,
     save_daily_log_detail,
-    get_assets_data_bulk,
+    get_position_assets_data,
+    normalize_positions,
     compare_portfolio,
     compare_latest_logs
 )
@@ -43,10 +44,10 @@ def load_positions():
     csv_buffer = StringIO()
     csv.writer(csv_buffer).writerows(sheet.get_all_values())
     csv_buffer.seek(0)
-    return pd.read_csv(csv_buffer)
+    return pd.read_csv(csv_buffer, dtype={"fund_code": "string"})
 
 
-df = load_positions()
+df = normalize_positions(load_positions())
 
 df["ticker"] = df["ticker"].astype(str).str.strip()
 
@@ -84,32 +85,7 @@ import time
 def load_prices(tickers):
     return get_prices_bulk(tickers)
 
-PROXY_ETF_TICKERS = {"VOO", "SCHD"}
-
-def calc_after_tax_dividend(row):
-    """
-    画面表示用の税引後参考額。
-    VOO/SCHD は実保有が日本の投資信託で、ETFは価格・配当の換算指標として
-    使っているため、米国ETFの10%源泉を重ねず、日本側の口座課税だけで概算する。
-    """
-    annual_div_jpy = float(row.get("annual_div_jpy", 0) or 0)
-    ticker = str(row.get("ticker", "")).upper()
-    acc_type = row.get("account_type", "")
-    currency = row.get("currency", "")
-
-    if annual_div_jpy == 0:
-        return 0
-
-    if ticker in PROXY_ETF_TICKERS:
-        return annual_div_jpy if acc_type == "NISA" else annual_div_jpy * (1 - 0.20315)
-
-    if currency == "USD" and acc_type == "特定":
-        return annual_div_jpy * 0.90 * (1 - 0.20315)
-    if currency == "USD" and acc_type == "NISA":
-        return annual_div_jpy * 0.90
-    if currency == "JPY":
-        return annual_div_jpy if acc_type == "NISA" else annual_div_jpy * (1 - 0.20315)
-    return annual_div_jpy * (1 - 0.20315)
+from dividend_tax import calc_after_tax_dividend
 
 @st.cache_data(ttl=3600)
 def load_daily_log_detail():
@@ -150,7 +126,10 @@ vnd_jpy, vnd_error = get_fx("VNDJPY=X", 0.006)
 df["ticker"] = df["ticker"].astype(str).str.strip()
 all_tickers = df["ticker"].unique()
 
-# 一括取得関数を1回だけ呼ぶ
+# 旧銘柄はYahoo、投信は公式データへ振り分ける。
+asset_data, fund_status = get_position_assets_data(df, include_dividend_details=True)
+
+# 一括取得結果
 (
     price_dict,
     div_yield_dict,
@@ -159,7 +138,23 @@ all_tickers = df["ticker"].unique()
     ttm_dividend_dict,
     forecast_dividend_dict,
     forecast_source_dict,
-) = get_assets_data_bulk(all_tickers, include_dividend_details=True)
+) = asset_data
+
+if fund_status:
+    with st.expander("投資信託の基準日・データ取得状態", expanded=True):
+        st.dataframe(pd.DataFrame([
+            {"商品名": r.get("product_name", ticker), "基準価額（1万口）": r["price"],
+             "基準日": r["base_date"], "前営業日比": r["previous_change"],
+             "取得状態": "成功" if r["success"] else "失敗"}
+            for ticker, r in fund_status.items()
+        ]), hide_index=True, use_container_width=True)
+        for ticker, record in fund_status.items():
+            for warning in record["warnings"]:
+                st.warning(f"{ticker}: {warning}")
+            if not record["success"]:
+                st.error(f"{ticker}: {record['error']}。評価額・保存を停止します。")
+    if any(not r["success"] for r in fund_status.values()):
+        st.stop()
 
 # 現金データの定義
 price_dict["CASH"] = 1.0
@@ -205,8 +200,7 @@ if st.query_params.get("auto_save") == "1":
     })
 
     if has_price_error or has_fx_error or has_invalid_price or has_invalid_df:
-        st.write("RESULT:", result)
-        print("RESULT:", result)
+        st.error("取得エラーのため保存を中止しました")
         st.stop()
 
     # --- 保存 ---
@@ -229,17 +223,20 @@ def _fx_to_jpy(row):
 df["fx_to_jpy"] = df.apply(_fx_to_jpy, axis=1)
 df["cost_basis_jpy"] = (
     pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
+    / df["price_unit"]
     * pd.to_numeric(df["cost_price"], errors="coerce").fillna(0)
     * df["fx_to_jpy"]
 )
 
 df["annual_div_ttm_jpy"] = (
     pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
+    / df["price_unit"]
     * pd.to_numeric(df["dividend_ttm_per_share"], errors="coerce").fillna(0)
     * df["fx_to_jpy"]
 )
 df["annual_div_forecast_jpy"] = (
     pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
+    / df["price_unit"]
     * pd.to_numeric(df["dividend_forecast_per_share"], errors="coerce").fillna(0)
     * df["fx_to_jpy"]
 )
@@ -336,7 +333,7 @@ for ticker in all_tickers: # unique_tickers から all_tickers に変更
     div = div_yield_dict.get(ticker, 0)
     
     # 既存のロジック（配当がない場合の警告リスト作成など）
-    if div == 0 and ticker not in ["CASH", "VOO", "BTC-JPY", "ETH-JPY"]:
+    if div == 0 and ticker not in fund_status and ticker not in ["CASH", "VOO", "BTC-JPY", "ETH-JPY"]:
         div_warning_tickers.append(ticker)
 
 # --- 配当・データ取得の警告表示 ---
@@ -666,16 +663,19 @@ st.header("💰 Dividend Summary")
 st.caption(f"配当基準: {dividend_basis} ／ 利回り基準: {yield_basis}")
 d1, d2, d3, d4 = st.columns(4)
 d1.metric("年間配当（税引前）", f"{total_div_pre:,.0f} 円")
-d2.metric("年間配当（税引後・参考）", f"{total_div_post:,.0f} 円")
-d3.metric("月平均（税引後・参考）", f"{(total_div_post/12):,.0f} 円")
+d2.metric("年間配当（税引後参考額）", f"{total_div_post:,.0f} 円")
+d3.metric("月平均（税引後参考額）", f"{(total_div_post/12):,.0f} 円")
 d4.metric(
     "予想－過去365日",
     f"{forecast_vs_ttm:+,.0f} 円",
     f"{forecast_vs_ttm_pct:+.1f}%"
 )
+if df_filtered["ticker"].isin(["VOO", "SCHD"]).any():
+    st.caption("※ VOO・SCHDの旧行は実保有の投資信託を対応ETFで換算した参考値です。")
 st.caption(
-    "※ VOO・SCHDは実保有の投資信託を対応ETFで換算した参考値です。"
-    "税引後額は実際のファンド分配・課税と一致しない場合があります。"
+    "過去365日実績は現在保有数量で換算した年間インカム力で、実際の入金額ではありません。"
+    "楽天SCHDの特定口座は全額普通分配・外国税10%・満額控除の二重課税調整モデルを使用します。"
+    "NISA・旧NISA・Jr.NISAの国内税は0。税引後参考額は実受取額と異なる場合があります。"
 )
 
 print("df columns:", df.columns)
@@ -766,7 +766,12 @@ fig_div = go.Figure(go.Treemap(
         cmid=0.025, # 2.5%を基準色にする
         cmin=0,
         cmax=0.05,
-        colorbar=dict(title=yield_basis, tickformat=".1%"),
+        colorbar=dict(
+            title=dict(text="利回り", side="top"), tickformat=".0%",
+            orientation="h", x=1, xanchor="right", y=-0.08, yanchor="top",
+            len=0.42, thickness=12, outlinewidth=0, tickfont=dict(size=10),
+            tickmode="array", tickvals=[0, 0.01, 0.02, 0.03, 0.04, 0.05],
+        ),
         line=dict(width=1, color="black")
     ),
     hovertemplate=f"<b>%{{label}}</b><br>年間配当: %{{value:,.0f}}円<br>{yield_basis}: %{{color:.2%}}<extra></extra>",
@@ -774,8 +779,8 @@ fig_div = go.Figure(go.Treemap(
 ))
 
 fig_div.update_layout(
-    height=700, 
-    margin=dict(t=0, l=10, r=10, b=10),
+    height=700,
+    margin=dict(t=0, l=10, r=10, b=85),
     
 )
 
@@ -825,7 +830,7 @@ if not df_div_share.empty:
     fig_div_share.update_traces(
         textposition='inside',
         textfont_size=14,
-        hovertemplate="<b>%{label}</b><br>税引後配当: %{value:,.0f}円<br>比率: %{text}<extra></extra>"
+        hovertemplate="<b>%{label}</b><br>税引後参考額: %{value:,.0f}円<br>比率: %{text}<extra></extra>"
     )
     
     fig_div_share.update_layout(
@@ -908,6 +913,8 @@ st.markdown("---")
 
 # --- (6) 配当金の表 ---
 st.subheader("📈 銘柄別配当データ")
+if fund_status:
+    st.caption("投資信託の単位配当は1万口当たり、株式・ETFは1株当たりです。")
 df_div_table = df_filtered[[
     "ticker",
     "display_name",
@@ -917,13 +924,15 @@ df_div_table = df_filtered[[
     "dividend_ttm_per_share",
     "dividend_forecast_per_share",
     "dividend_forecast_source",
+    "price_unit",
 ]].copy()
 df_div_table = df_div_table.rename(columns={
     "div_yield": f"{yield_basis}利回り",
     "annual_div_jpy": f"年間配当（{dividend_basis}・税引前）",
     "after_tax_div_jpy": f"年間配当（{dividend_basis}・税引後参考）",
-    "dividend_ttm_per_share": "1株配当（過去365日）",
-    "dividend_forecast_per_share": "1株配当（予想）",
+    "price_unit": "価格単位",
+    "dividend_ttm_per_share": "単位配当（過去365日）",
+    "dividend_forecast_per_share": "単位配当（予想）",
     "dividend_forecast_source": "予想根拠",
 })
 st.dataframe(
@@ -931,8 +940,8 @@ st.dataframe(
         f"{yield_basis}利回り": "{:.2%}",
         f"年間配当（{dividend_basis}・税引前）": "{:,.0f}",
         f"年間配当（{dividend_basis}・税引後参考）": "{:,.0f}",
-        "1株配当（過去365日）": "{:,.4f}",
-        "1株配当（予想）": "{:,.4f}",
+        "単位配当（過去365日）": "{:,.4f}",
+        "単位配当（予想）": "{:,.4f}",
     })
 )
 
@@ -989,6 +998,10 @@ if 'df_log' in locals() and not df_log.empty:
         e_date
         )
 
+        if summary["migration_names"]:
+            st.warning("投信の評価方法変更を含む期間です（" + "・".join(summary["migration_names"]) +
+                       "）。資産増減にはETF換算から実基準価額への移行差が含まれます。"
+                       "対象銘柄の騰落率・ランキングは表示を控えています。")
         total_start = summary["total_start"]
         total_end = summary["total_end"]
         total_diff = summary["total_diff"]
