@@ -123,14 +123,29 @@ def get_mutual_fund_data(fund_code, now=None):
             date, nav, delta = _date(latest[1]), _number(latest[2]), _number(latest[3])
             distributions = _csv_distributions(_csv_rows(_get(spec["distributions"])), 2, 3)
         elif spec["provider"] == "mufg":
-            payload = _get(spec["latest"]).json()
-            if payload["result"]["status"] != 200 or payload["result"]["retcount"] != 1:
-                raise ValueError("invalid official API result")
-            latest = payload["datasets"][0]
-            if latest["association_fund_cd"] != code:
-                raise ValueError("official API fund code mismatch")
-            date, nav, delta = _date(latest["base_date"]), _number(latest["nav"]), _number(latest["cmp_prev_day"])
             distributions = _csv_distributions(rows, 0, 3)
+            try:
+                payload = _get(spec["latest"]).json()
+                if payload["result"]["status"] != 200 or payload["result"]["retcount"] != 1:
+                    raise ValueError("invalid official API result")
+                latest = payload["datasets"][0]
+                if latest["association_fund_cd"] != code:
+                    raise ValueError("official API fund code mismatch")
+                date, nav, delta = (
+                    _date(latest["base_date"]),
+                    _number(latest["nav"]),
+                    _number(latest["cmp_prev_day"]),
+                )
+            except (requests.RequestException, ValueError, KeyError, TypeError):
+                # MUFG's public API can be temporarily unavailable from some
+                # hosting environments. Fall back only to MUFG's own official
+                # historical CSV, never to an ETF proxy.
+                date = history.index[-1]
+                nav = float(history.iloc[-1])
+                delta = nav - float(history.iloc[-2])
+                result["warnings"].append(
+                    "MUFG公式API取得失敗のため、MUFG公式履歴CSVの最新値を使用"
+                )
         else:
             date, nav = history.index[-1], float(history.iloc[-1])
             delta = nav - float(history.iloc[-2])

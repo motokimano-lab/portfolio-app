@@ -84,6 +84,18 @@ class Tests(unittest.TestCase):
         r,status=functions.get_position_assets_data(native(),True,ASOF)
         self.assertEqual(r[3],['MF:9I312249']);self.assertTrue(math.isnan(r[0]['MF:9I312249']))
         self.assertFalse(status['MF:9I312249']['success']);yahoo.assert_not_called()
+    def test_mufg_api_failure_falls_back_to_official_csv(self):
+        latest_url=mf.FUND_SPECS['03311187']['latest']
+        def fallback_response(url,**kwargs):
+            if url == latest_url:
+                raise requests.HTTPError("temporary API error")
+            return response(url,**kwargs)
+        with patch('mutual_funds.requests.get',side_effect=fallback_response):
+            r=mf.get_mutual_fund_data('03311187',ASOF)
+        self.assertTrue(r['success'],r['error'])
+        self.assertEqual((r['price'],r['base_date'],r['previous_change']),(45246,'2026-10-09',-148))
+        self.assertTrue(any('公式履歴CSV' in w for w in r['warnings']))
+
     def test_future_distribution_mufg(self):
         url=mf.FUND_SPECS['03311187']['history'];old=FIXTURES[url]
         text=old.decode('cp932').replace('2026/04/27,41935,41935,0,','2026/04/27,41935,41935,12,')
