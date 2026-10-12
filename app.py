@@ -767,8 +767,8 @@ fig_div = go.Figure(go.Treemap(
         cmin=0,
         cmax=0.05,
         colorbar=dict(
-            title=dict(text="利回り", side="top"), tickformat=".0%",
-            orientation="h", x=1, xanchor="right", y=-0.08, yanchor="top",
+            tickformat=".0%",
+            orientation="h", x=1, xanchor="right", y=-0.025, yanchor="top",
             len=0.42, thickness=12, outlinewidth=0, tickfont=dict(size=10),
             tickmode="array", tickvals=[0, 0.01, 0.02, 0.03, 0.04, 0.05],
         ),
@@ -780,8 +780,20 @@ fig_div = go.Figure(go.Treemap(
 
 fig_div.update_layout(
     height=700,
-    margin=dict(t=0, l=10, r=10, b=85),
-    
+    margin=dict(t=0, l=10, r=10, b=55),
+    annotations=[
+        dict(
+            text="利回り",
+            xref="paper",
+            yref="paper",
+            x=0.565,
+            y=-0.052,
+            xanchor="right",
+            yanchor="middle",
+            showarrow=False,
+            font=dict(size=12),
+        )
+    ],
 )
 
 st.plotly_chart(fig_div, use_container_width=True, key="dividend_tree_new")
