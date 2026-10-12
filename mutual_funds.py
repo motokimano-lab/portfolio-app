@@ -38,7 +38,20 @@ FUND_SPECS = {
 
 
 def _get(url):
-    response = requests.get(url, timeout=(10, 30))
+    # Some fund-provider CDNs reject generic data-center HTTP clients.
+    # Send ordinary browser-like headers while still using the provider's
+    # public, unauthenticated official endpoints.
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/140.0 Safari/537.36"
+        ),
+        "Accept": "text/csv,application/json,application/xml,text/xml,text/plain,*/*",
+        "Accept-Language": "ja,en-US;q=0.8,en;q=0.7",
+        "Cache-Control": "no-cache",
+    }
+    response = requests.get(url, timeout=(10, 30), headers=headers)
     response.raise_for_status()
     return response
 
