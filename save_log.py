@@ -10,7 +10,8 @@ import requests
 
 from functions import (
     get_fx,
-    get_assets_data_bulk,
+    get_position_assets_data,
+    normalize_positions,
     prepare_base_dataframe,
     save_daily_log_detail,
     load_daily_log_detail,
@@ -32,7 +33,7 @@ sheet = spreadsheet.worksheet("Positions")
 csv_buffer = StringIO()
 csv.writer(csv_buffer).writerows(sheet.get_all_values())
 csv_buffer.seek(0)
-df = pd.read_csv(csv_buffer)
+df = normalize_positions(pd.read_csv(csv_buffer, dtype={"fund_code": "string"}))
 
 # --- ② 為替
 usd_jpy, usd_error = get_fx("JPY=X", 150)
@@ -42,7 +43,13 @@ vnd_jpy, vnd_error = get_fx("VNDJPY=X", 0.006)
 df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
 tickers = df["ticker"].unique()
 
-price_dict, div_dict, perf_dict, errors = get_assets_data_bulk(tickers)
+asset_data, fund_status = get_position_assets_data(df)
+price_dict, div_dict, perf_dict, errors = asset_data
+for ticker, record in fund_status.items():
+    if not record["success"]:
+        print(f"ERROR {ticker}: {record['error']}")
+    for warning in record["warnings"]:
+        print(f"WARNING {ticker}: {warning}")
 
 price_dict["CASH"] = 1.0
 div_dict["CASH"] = 0.0
@@ -58,7 +65,7 @@ df["day_diff_pct"] = df["ticker"].map(lambda x: perf_dict.get(x, (0,0))[1])
 df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 
 # --- ⑥ 異常チェック（これ今のロジックそのまま使える）
-if errors or usd_error or vnd_error:
+if errors or usd_error or vnd_error or df["value_jpy"].isna().any():
     print("ERROR DETECTED → SKIP SAVE")
     exit()
 
@@ -96,8 +103,12 @@ for _, row in top_losers.head(3).iterrows():
         f"{row['growth_pct']:+.2f}%\n"
     )
 
+migration_note = (
+    "\n⚠️ 投信評価方法の移行差を含みます（" + "・".join(compare_result["migration_names"]) + "）\n"
+    if compare_result["migration_names"] else ""
+)
 msg = f"""
-📊 Portfolio Update
+📊 Portfolio Update{migration_note}
 
 💰 総資産
 {compare_result['total_end']:,.0f} 円
