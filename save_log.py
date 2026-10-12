@@ -1,5 +1,10 @@
+import csv
 import json
 import os
+from io import StringIO
+
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import requests
 
@@ -12,9 +17,22 @@ from functions import (
     compare_latest_logs
 )
 
-# --- ① データ読み込み（ここ重要）
-url = "https://docs.google.com/spreadsheets/d/18PLN9uJHxVZCAvAw92piWCniLlQ2i8Z6dT8ok_jycBI/export?format=csv&gid=0"
-df = pd.read_csv(url)
+# --- ① 認証付きでPositionsを読み込み
+creds_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
+scope = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive"
+]
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+client = gspread.authorize(creds)
+spreadsheet = client.open("portfolio_data")
+sheet = spreadsheet.worksheet("Positions")
+
+# app.pyと同じ型推論・空欄処理を維持する。
+csv_buffer = StringIO()
+csv.writer(csv_buffer).writerows(sheet.get_all_values())
+csv_buffer.seek(0)
+df = pd.read_csv(csv_buffer)
 
 # --- ② 為替
 usd_jpy, usd_error = get_fx("JPY=X", 150)
@@ -45,7 +63,6 @@ if errors or usd_error or vnd_error:
     exit()
 
 # --- ⑦ 保存
-creds_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
 result = save_daily_log_detail(df, creds_dict)
 
 print(result)
