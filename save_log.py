@@ -8,6 +8,17 @@ from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import requests
 
+MAX_MUTUAL_FUND_BUSINESS_DAYS_OLD = 5
+
+def notify_discord(message):
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL")
+    if not webhook_url:
+        return
+    try:
+        requests.post(webhook_url, json={"content": message}, timeout=15)
+    except requests.RequestException:
+        pass
+
 from functions import (
     get_fx,
     get_position_assets_data,
@@ -45,11 +56,17 @@ tickers = df["ticker"].unique()
 
 asset_data, fund_status = get_position_assets_data(df)
 price_dict, div_dict, perf_dict, errors = asset_data
+stale_funds = []
 for ticker, record in fund_status.items():
     if not record["success"]:
         print(f"ERROR {ticker}: {record['error']}")
     for warning in record["warnings"]:
         print(f"WARNING {ticker}: {warning}")
+    age = record.get("business_days_old")
+    if age is not None and age > MAX_MUTUAL_FUND_BUSINESS_DAYS_OLD:
+        stale_funds.append(
+            f"{ticker} {record.get('base_date')} ({age} business days old, source={record.get('source')})"
+        )
 
 price_dict["CASH"] = 1.0
 div_dict["CASH"] = 0.0
@@ -67,7 +84,17 @@ df = prepare_base_dataframe(df, usd_jpy, vnd_jpy)
 # --- ⑥ 異常チェック（これ今のロジックそのまま使える）
 if errors or usd_error or vnd_error or df["value_jpy"].isna().any():
     print("ERROR DETECTED → SKIP SAVE")
-    exit()
+    notify_discord("⚠️ Portfolio Daily_Log保存をスキップしました：価格・為替データ取得エラー")
+    raise SystemExit(1)
+
+if stale_funds:
+    details = "\n".join(stale_funds)
+    print("STALE MUTUAL FUND DATA → SKIP SAVE\n" + details)
+    notify_discord(
+        "⚠️ Portfolio Daily_Log保存をスキップしました：投信基準価額が古すぎます\n"
+        + details
+    )
+    raise SystemExit(1)
 
 # --- ⑦ 保存
 result = save_daily_log_detail(df, creds_dict)
