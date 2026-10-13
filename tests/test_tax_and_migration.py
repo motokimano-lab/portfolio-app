@@ -81,6 +81,24 @@ class TaxAndMigrationTests(unittest.TestCase):
         _,summary=compare_portfolio(log,date(2026,10,9),date(2026,10,12))
         self.assertEqual(summary['migration_names'],['SP500'])
 
+    def test_market_movers_ignore_cash_and_trade_size(self):
+        frame = pd.DataFrame([
+            dict(ticker='CASH', display_name='USD', day_diff_pct=0, value_jpy=2000000),
+            dict(ticker='AAA', display_name='AAA', day_diff_pct=2.0, value_jpy=100000),
+            dict(ticker='AAA', display_name='AAA', day_diff_pct=2.0, value_jpy=900000),
+            dict(ticker='BBB', display_name='BBB', day_diff_pct=-1.5, value_jpy=500000),
+            dict(ticker='MF:03311187', display_name='SP500', day_diff_pct=-0.4, value_jpy=3000000),
+            dict(ticker='MF:89311199', display_name='SP500', day_diff_pct=-0.2, value_jpy=1000000),
+        ])
+        from functions import build_current_market_movers
+        gainers, losers = build_current_market_movers(frame)
+        self.assertNotIn('USD', gainers.display_name.tolist() + losers.display_name.tolist())
+        self.assertEqual(gainers.iloc[0].display_name, 'AAA')
+        self.assertAlmostEqual(gainers.iloc[0].market_pct, 2.0)
+        sp = gainers.loc[gainers.display_name.eq('SP500')].iloc[0].market_pct
+        self.assertAlmostEqual(sp, -0.35)
+        self.assertEqual(losers.iloc[0].display_name, 'BBB')
+
     def test_writer_six_columns_and_today_replacement(self):
         # Local double only: no real client and no Google Sheets mutation.
         from datetime import datetime

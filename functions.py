@@ -413,6 +413,54 @@ def clean_tickers(tickers):
                 cleaned.append(t)
     return list(set(cleaned))
 
+def build_current_market_movers(df, top_n=10):
+    """Rank current holdings by price/NAV day return, independent of cash flows/trades.
+
+    Multiple accounts holding the same display_name are combined using current
+    JPY value as weights. CASH rows are excluded. This means deposits,
+    withdrawals, new purchases, partial sales, and buy-size changes do not turn
+    into fake gainers/losers in the Discord ranking.
+    """
+    data = df.copy()
+    if data.empty:
+        empty = pd.DataFrame(columns=["display_name", "market_pct"])
+        return empty, empty
+
+    data["ticker"] = data["ticker"].astype(str).str.strip().str.upper()
+    data["display_name"] = data["display_name"].fillna(data["ticker"]).astype(str)
+    data["day_diff_pct"] = pd.to_numeric(data["day_diff_pct"], errors="coerce")
+    data["value_jpy"] = pd.to_numeric(data["value_jpy"], errors="coerce").fillna(0)
+
+    data = data[
+        data["ticker"].ne("CASH")
+        & data["day_diff_pct"].notna()
+        & data["value_jpy"].gt(0)
+    ].copy()
+
+    if data.empty:
+        empty = pd.DataFrame(columns=["display_name", "market_pct"])
+        return empty, empty
+
+    data["weighted_pct"] = data["day_diff_pct"] * data["value_jpy"]
+    grouped = (
+        data.groupby("display_name", as_index=False)
+        .agg(value_jpy=("value_jpy", "sum"), weighted_pct=("weighted_pct", "sum"))
+    )
+    grouped["market_pct"] = grouped["weighted_pct"] / grouped["value_jpy"]
+
+    gainers = (
+        grouped.sort_values("market_pct", ascending=False)
+        .head(top_n)[["display_name", "market_pct"]]
+        .reset_index(drop=True)
+    )
+    losers = (
+        grouped.sort_values("market_pct", ascending=True)
+        .head(top_n)[["display_name", "market_pct"]]
+        .reset_index(drop=True)
+    )
+    return gainers, losers
+
+
 def save_daily_log_detail(df, creds_dict):
 
     scope = [
