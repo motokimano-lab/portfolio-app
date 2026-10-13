@@ -126,7 +126,7 @@ vnd_jpy, vnd_error = get_fx("VNDJPY=X", 0.006)
 df["ticker"] = df["ticker"].astype(str).str.strip()
 all_tickers = df["ticker"].unique()
 
-# 旧銘柄はYahoo、投信は公式データへ振り分ける。
+# 株式等はYahoo、投信はYahoo→第2ソース→最終正常値キャッシュで取得する。
 asset_data, fund_status = get_position_assets_data(df, include_dividend_details=True)
 
 # 一括取得結果
@@ -142,9 +142,15 @@ asset_data, fund_status = get_position_assets_data(df, include_dividend_details=
 
 if fund_status:
     with st.expander("投資信託の基準日・データ取得状態", expanded=True):
+        source_labels = {
+            "yahoo_finance": "Yahoo!ファイナンス",
+            "official_or_provider": "運用会社・提供元",
+            "last_good_cache": "最終正常値キャッシュ",
+        }
         st.dataframe(pd.DataFrame([
             {"商品名": r.get("product_name", ticker), "基準価額（1万口）": r["price"],
              "基準日": r["base_date"], "前営業日比": r["previous_change"],
+             "取得元": source_labels.get(r.get("source"), r.get("source") or "未取得"),
              "取得状態": "成功" if r["success"] else "失敗"}
             for ticker, r in fund_status.items()
         ]), hide_index=True, use_container_width=True)
