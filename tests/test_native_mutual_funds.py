@@ -47,6 +47,29 @@ class Tests(unittest.TestCase):
             self.assertEqual((r['price'],r['ttm_distribution'],r['forecast_distribution']),expected)
             self.assertEqual(r['base_date'],'2026-10-09')
             self.assertTrue(r['stale']);self.assertTrue(r['warnings'])
+    def test_yahoo_primary_source(self):
+        history_url=mf.YAHOO_HISTORY.format(code='9I312249')
+        dividend_url=mf.YAHOO_DIVIDENDS.format(code='9I312249')
+        history_html=b"""<table><tr><th>date</th><th>nav</th><th>diff</th></tr>
+        <tr><td>2026/10/09</td><td>13,207</td><td>+214</td></tr>
+        <tr><td>2026/10/08</td><td>12,993</td><td>-121</td></tr></table>"""
+        dividend_html="""<table><tr><th>date</th><th>distribution</th></tr>
+        <tr><td>2026/08/25</td><td>95円</td></tr>
+        <tr><td>2026/05/25</td><td>90円</td></tr>
+        <tr><td>2026/02/25</td><td>90円</td></tr>
+        <tr><td>2025/11/25</td><td>85円</td></tr></table>""".encode('utf-8')
+        def yahoo_response(url,**kwargs):
+            if url==history_url: data=history_html
+            elif url==dividend_url: data=dividend_html
+            else: raise AssertionError('official source should not be called')
+            r=requests.Response();r.status_code=200;r._content=data;r.encoding='utf-8';return r
+        with patch('mutual_funds.requests.get',side_effect=yahoo_response):
+            r=mf.get_mutual_fund_data('9I312249',ASOF,allow_cache=False)
+        self.assertTrue(r['success'],r['error'])
+        self.assertEqual(r['source'],'yahoo_finance')
+        self.assertEqual((r['price'],r['previous_change']),(13207,214))
+        self.assertEqual((r['ttm_distribution'],r['forecast_distribution']),(360,380))
+
     def test_unit_legacy_values_unchanged(self):
         source=rows();result=functions.prepare_base_dataframe(source,150,.006)
         expected=source['price']*source['quantity']*pd.Series([150,150,1,1])
@@ -80,10 +103,12 @@ class Tests(unittest.TestCase):
         yahoo.assert_not_called()
     @patch('mutual_funds.requests.get',side_effect=requests.Timeout())
     @patch('functions.yf.download',side_effect=AssertionError('ETF fallback'))
-    def test_failure_explicit_no_etf_fallback(self,yahoo,get):
+    def test_live_failure_uses_cache_not_etf(self,yahoo,get):
         r,status=functions.get_position_assets_data(native(),True,ASOF)
-        self.assertEqual(r[3],['MF:9I312249']);self.assertTrue(math.isnan(r[0]['MF:9I312249']))
-        self.assertFalse(status['MF:9I312249']['success']);yahoo.assert_not_called()
+        self.assertFalse(r[3])
+        self.assertEqual(r[0]['MF:9I312249'],13207)
+        self.assertEqual(status['MF:9I312249']['source'],'last_good_cache')
+        yahoo.assert_not_called()
     @patch('mutual_funds.requests.get',side_effect=requests.Timeout())
     def test_all_live_sources_failure_uses_last_good_cache(self,get):
         r=mf.get_mutual_fund_data('03311187',ASOF)
@@ -138,7 +163,7 @@ class Tests(unittest.TestCase):
         url=mf.FUND_SPECS['03311187']['latest'];old=FIXTURES[url]
         data=json.loads(old);data['datasets'][0]['nav']=1;FIXTURES[url]=json.dumps(data).encode()
         try:
-            with patch('mutual_funds.requests.get',side_effect=response):r=mf.get_mutual_fund_data('03311187',ASOF)
+            with patch('mutual_funds.requests.get',side_effect=response):r=mf.get_mutual_fund_data('03311187',ASOF,allow_cache=False)
             self.assertFalse(r['success'])
         finally:FIXTURES[url]=old
 
