@@ -1,35 +1,41 @@
 {
-  "generated_at": "2026-10-12T18:00:00+09:00",
+  "generated_at": "2026-10-14T05:46:27.931447+09:00",
   "funds": {
     "89311199": {
       "product_name": "SBI・V・S&P500インデックス・ファンド",
-      "price": 41344,
-      "base_date": "2026-10-09",
-      "previous_change": -120,
-      "previous_change_pct": -0.2894076789504148,
-      "ttm_distribution": 0,
-      "forecast_distribution": 0,
-      "forecast_source": "公式直近分配金×1回/年（推計・1万口当たり）"
+      "price": 41662.0,
+      "base_date": "2026-10-13",
+      "previous_change": 318.0,
+      "previous_change_pct": 0.7691563467492261,
+      "ttm_distribution": 0.0,
+      "forecast_distribution": 0.0,
+      "forecast_source": "直近分配金×1回/年（推計・1万口当たり）",
+      "source": "yahoo_finance",
+      "fetched_at": "2026-10-14T05:46:27.931447+09:00"
     },
     "9I312249": {
       "product_name": "楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）",
-      "price": 13207,
-      "base_date": "2026-10-09",
-      "previous_change": 214,
-      "previous_change_pct": 1.6470407142307397,
-      "ttm_distribution": 360,
-      "forecast_distribution": 380,
-      "forecast_source": "公式直近分配金×4回/年（推計・1万口当たり）"
+      "price": 13282.0,
+      "base_date": "2026-10-13",
+      "previous_change": 75.0,
+      "previous_change_pct": 0.5678806693420156,
+      "ttm_distribution": 360.0,
+      "forecast_distribution": 380.0,
+      "forecast_source": "直近分配金×4回/年（推計・1万口当たり）",
+      "source": "yahoo_finance",
+      "fetched_at": "2026-10-14T05:46:27.931447+09:00"
     },
     "03311187": {
       "product_name": "eMAXIS Slim 米国株式（S&P500）",
-      "price": 45246,
-      "base_date": "2026-10-09",
-      "previous_change": -148,
-      "previous_change_pct": -0.32603427765784027,
-      "ttm_distribution": 0,
-      "forecast_distribution": 0,
-      "forecast_source": "公式直近分配金×1回/年（推計・1万口当たり）"
+      "price": 45597.0,
+      "base_date": "2026-10-13",
+      "previous_change": 351.0,
+      "previous_change_pct": 0.7757591831322106,
+      "ttm_distribution": 0.0,
+      "forecast_distribution": 0.0,
+      "forecast_source": "直近分配金×1回/年（推計・1万口当たり）",
+      "source": "yahoo_finance",
+      "fetched_at": "2026-10-14T05:46:27.931447+09:00"
     }
   }
 }
