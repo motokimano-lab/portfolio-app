@@ -26,7 +26,8 @@ from functions import (
     prepare_base_dataframe,
     save_daily_log_detail,
     load_daily_log_detail,
-    compare_latest_logs
+    compare_latest_logs,
+    build_current_market_movers
 )
 
 # --- ① 認証付きでPositionsを読み込み
@@ -111,23 +112,22 @@ compare_result = compare_latest_logs(df_log)
 # Discord通知
 webhook_url = os.environ["DISCORD_WEBHOOK_URL"]
 
-# TOPランキング取得
-top_gainers = compare_result["top_gainers"]
-top_losers = compare_result["top_losers"]
+# TOPランキングは資産額の増減ではなく、当日の価格/NAV騰落率で作る。
+# これにより入出金・新規購入・買い増し・一部売却の影響をランキングから除外する。
+top_gainers, top_losers = build_current_market_movers(df)
 
-# TOP3だけ使う
 gain_text = ""
 for _, row in top_gainers.head(3).iterrows():
     gain_text += (
         f"{row['display_name']} "
-        f"{row['growth_pct']:+.2f}%\n"
+        f"{row['market_pct']:+.2f}%\n"
     )
 
 loss_text = ""
 for _, row in top_losers.head(3).iterrows():
     loss_text += (
         f"{row['display_name']} "
-        f"{row['growth_pct']:+.2f}%\n"
+        f"{row['market_pct']:+.2f}%\n"
     )
 
 migration_note = (
@@ -144,11 +144,12 @@ msg = f"""
 {compare_result['total_diff']:+,.0f} 円
 ({compare_result['total_growth']:+.2f}%)
 
-🟢 TOP Gainers
+🟢 Market Gainers
 {gain_text}
 
-🔴 TOP Losers
+🔴 Market Losers
 {loss_text}
+※ ランキングは当日の価格/NAV騰落率。現金・入出金・売買数量の変化は除外。
 """
 
 requests.post(
