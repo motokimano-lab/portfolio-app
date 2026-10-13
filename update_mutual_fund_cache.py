@@ -1,7 +1,11 @@
-"""Refresh the repository's last-known-good mutual-fund cache from official sources."""
+"""Refresh the repository's last-known-good mutual-fund cache.
+
+Live-source priority is handled by mutual_funds.get_mutual_fund_data:
+Yahoo! Finance Japan -> official/provider source. Cache itself is disabled here
+so failed live retrieval never refreshes timestamps on stale data.
+"""
 import json
 from datetime import datetime
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from mutual_funds import CACHE_PATH, FUND_SPECS, get_mutual_fund_data
@@ -19,8 +23,9 @@ def main():
     for code in FUND_SPECS:
         record = get_mutual_fund_data(code, now=now, allow_cache=False)
         if not record["success"]:
-            print(f"[WARN] {code}: {record['error']} — preserving existing cache")
+            print(f"[WARN] {code}: {record['error']} — preserving existing cache exactly")
             continue
+
         funds[code] = {
             "product_name": record["product_name"],
             "price": record["price"],
@@ -30,9 +35,14 @@ def main():
             "ttm_distribution": record["ttm_distribution"],
             "forecast_distribution": record["forecast_distribution"],
             "forecast_source": record["forecast_source"],
+            "source": record.get("source"),
+            "fetched_at": now.isoformat(),
         }
         successes += 1
-        print(f"[OK] {code}: {record['base_date']} NAV={record['price']}")
+        print(
+            f"[OK] {code}: {record['base_date']} NAV={record['price']} "
+            f"source={record.get('source')}"
+        )
 
     if not funds:
         raise SystemExit("No cache data available")
