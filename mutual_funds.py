@@ -2,13 +2,18 @@
 import csv
 from datetime import datetime
 from io import StringIO
+import json
 import math
+from pathlib import Path
 from zoneinfo import ZoneInfo
 import xml.etree.ElementTree as ET
 
 import pandas as pd
 import requests
 from dividend_tax import FOREIGN_WITHHOLDING_RATE
+
+
+CACHE_PATH = Path(__file__).resolve().parent / "data" / "mutual_fund_cache.json"
 
 
 FUND_SPECS = {
@@ -35,6 +40,44 @@ FUND_SPECS = {
         "distributions": "https://apl.wealthadvisor.jp/xml/chart/funddata/2019092601.xml",
     },
 }
+
+
+def _load_cached_record(code, today):
+    try:
+        payload = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+        item = payload.get("funds", {}).get(code)
+        if not item:
+            return None
+        base_date = pd.Timestamp(item["base_date"])
+        if base_date > today:
+            return None
+        result = {
+            "fund_code": code,
+            "ticker": "MF:" + code,
+            "price_unit": 10000,
+            "success": True,
+            "price": float(item["price"]),
+            "base_date": item["base_date"],
+            "previous_change": float(item["previous_change"]),
+            "previous_change_pct": float(item["previous_change_pct"]),
+            "ttm_distribution": float(item["ttm_distribution"]),
+            "forecast_distribution": float(item["forecast_distribution"]),
+            "history": None,
+            "distributions": None,
+            "warnings": [
+                "公式データ取得失敗のため、最終正常値キャッシュを使用: "
+                + item["base_date"]
+            ],
+            "error": None,
+            "stale": True,
+            "fetched_at": payload.get("generated_at"),
+            "product_name": item["product_name"],
+            "forecast_source": item["forecast_source"],
+            "source": "last_good_cache",
+        }
+        return result
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return None
 
 
 def _get(url):
@@ -110,7 +153,7 @@ def _csv_distributions(rows, date_column, amount_column):
     return pd.Series(dict(records), dtype=float).sort_index()
 
 
-def get_mutual_fund_data(fund_code, now=None):
+def get_mutual_fund_data(fund_code, now=None, allow_cache=True):
     """Return explicit success/date/warnings; never substitute an ETF price.
 
     TTM uses (as_of - 365 days, as_of], in Japan's timezone. Zero distribution
@@ -205,5 +248,9 @@ def get_mutual_fund_data(fund_code, now=None):
                       forecast_source=f"公式直近分配金×{spec['frequency']}回/年（推計・1万口当たり）")
     except (requests.RequestException, ValueError, KeyError, IndexError, StopIteration, ET.ParseError, TypeError) as error:
         # Provider errors do not contain credentials: these are public requests.
+        if allow_cache:
+            cached = _load_cached_record(code, today)
+            if cached is not None:
+                return cached
         result["error"] = f"公式データ取得失敗: {type(error).__name__}"
     return result
