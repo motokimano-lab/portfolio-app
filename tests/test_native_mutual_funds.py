@@ -84,6 +84,14 @@ class Tests(unittest.TestCase):
         r,status=functions.get_position_assets_data(native(),True,ASOF)
         self.assertEqual(r[3],['MF:9I312249']);self.assertTrue(math.isnan(r[0]['MF:9I312249']))
         self.assertFalse(status['MF:9I312249']['success']);yahoo.assert_not_called()
+    @patch('mutual_funds.requests.get',side_effect=requests.Timeout())
+    def test_all_live_sources_failure_uses_last_good_cache(self,get):
+        r=mf.get_mutual_fund_data('03311187',ASOF)
+        self.assertTrue(r['success'],r['error'])
+        self.assertEqual((r['price'],r['base_date']),(45246,'2026-10-09'))
+        self.assertTrue(r['stale'])
+        self.assertTrue(any('最終正常値キャッシュ' in w for w in r['warnings']))
+
     def test_mufg_api_failure_falls_back_to_official_csv(self):
         latest_url=mf.FUND_SPECS['03311187']['latest']
         def fallback_response(url,**kwargs):
