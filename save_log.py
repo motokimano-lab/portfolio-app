@@ -25,6 +25,7 @@ from functions import (
     normalize_positions,
     prepare_base_dataframe,
     save_daily_log_detail,
+    save_daily_log_v2,
     load_daily_log_detail,
     compare_latest_logs,
     build_current_market_movers
@@ -99,8 +100,17 @@ if stale_funds:
 
 # --- ⑦ 保存
 result = save_daily_log_detail(df, creds_dict)
-
 print(result)
+
+try:
+    detail_result = save_daily_log_v2(df, creds_dict)
+    print(detail_result)
+except Exception as error:
+    notify_discord(
+        "⚠️ Portfolio Daily_Log_V2保存に失敗しました。"
+        "従来Daily_Logは保存済みですが、要因分析用の詳細ログが欠けています。"
+    )
+    raise
 
 # --- Discord通知 ---
 # ログ読み込み
