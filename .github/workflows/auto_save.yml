@@ -6,6 +6,10 @@ on:
   # - cron: '11 13 * * *'  # ←日本時間7時
 
     
+concurrency:
+  group: portfolio-auto-save
+  cancel-in-progress: false
+
 jobs:
   run:
     runs-on: ubuntu-latest
