@@ -3,6 +3,7 @@ import json
 import math
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 from datetime import datetime
@@ -14,6 +15,33 @@ import functions
 import mutual_funds as mf
 
 ASOF=datetime(2026,10,12)
+TEST_CACHE = {
+    "generated_at": "2026-10-12T18:00:00+09:00",
+    "funds": {
+        "9I312249": {
+            "product_name": "楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）",
+            "price": 13207,
+            "base_date": "2026-10-09",
+            "previous_change": 214,
+            "previous_change_pct": 214 / 12993 * 100,
+            "ttm_distribution": 360,
+            "forecast_distribution": 380,
+            "forecast_source": "直近分配金×4回/年（推計・1万口当たり）",
+            "fetched_at": "2026-10-12T18:00:00+09:00",
+        },
+        "03311187": {
+            "product_name": "eMAXIS Slim 米国株式（S&P500）",
+            "price": 45246,
+            "base_date": "2026-10-09",
+            "previous_change": -148,
+            "previous_change_pct": -148 / 45394 * 100,
+            "ttm_distribution": 0,
+            "forecast_distribution": 0,
+            "forecast_source": "直近分配金×1回/年（推計・1万口当たり）",
+            "fetched_at": "2026-10-12T18:00:00+09:00",
+        },
+    },
+}
 FIXTURES = {
  mf.FUND_SPECS['9I312249']['history']: "基準日,基準価額,再投資価額,純資産,分配金\n2024/09/18,9999,9999,0,\n2026/10/08,12993,13689,0,\n2026/10/09,13207,13914,0,\n".encode('cp932'),
  mf.FUND_SPECS['9I312249']['latest']: b"code,date,nav,change,assets\n100105,2026/10/09,13207,214,0\n",
@@ -104,14 +132,22 @@ class Tests(unittest.TestCase):
     @patch('mutual_funds.requests.get',side_effect=requests.Timeout())
     @patch('functions.yf.download',side_effect=AssertionError('ETF fallback'))
     def test_live_failure_uses_cache_not_etf(self,yahoo,get):
-        r,status=functions.get_position_assets_data(native(),True,ASOF)
+        with tempfile.TemporaryDirectory() as directory:
+            cache_path = Path(directory) / 'mutual_fund_cache.json'
+            cache_path.write_text(json.dumps(TEST_CACHE), encoding='utf-8')
+            with patch.object(mf, 'CACHE_PATH', cache_path):
+                r,status=functions.get_position_assets_data(native(),True,ASOF)
         self.assertFalse(r[3])
         self.assertEqual(r[0]['MF:9I312249'],13207)
         self.assertEqual(status['MF:9I312249']['source'],'last_good_cache')
         yahoo.assert_not_called()
     @patch('mutual_funds.requests.get',side_effect=requests.Timeout())
     def test_all_live_sources_failure_uses_last_good_cache(self,get):
-        r=mf.get_mutual_fund_data('03311187',ASOF)
+        with tempfile.TemporaryDirectory() as directory:
+            cache_path = Path(directory) / 'mutual_fund_cache.json'
+            cache_path.write_text(json.dumps(TEST_CACHE), encoding='utf-8')
+            with patch.object(mf, 'CACHE_PATH', cache_path):
+                r=mf.get_mutual_fund_data('03311187',ASOF)
         self.assertTrue(r['success'],r['error'])
         self.assertEqual((r['price'],r['base_date']),(45246,'2026-10-09'))
         self.assertTrue(r['stale'])
