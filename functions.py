@@ -461,48 +461,136 @@ def build_current_market_movers(df, top_n=10):
     return gainers, losers
 
 
-def save_daily_log_detail(df, creds_dict):
+DAILY_LOG_V2_HEADERS = [
+    "date", "snapshot_at", "owner", "account_type", "ticker", "display_name",
+    "asset_class", "sector", "currency", "instrument_type", "fund_code",
+    "product_name", "price_unit", "quantity", "price", "fx_to_jpy",
+    "value_jpy", "cost_basis_jpy", "purpose", "role", "day_diff_pct"
+]
 
+
+def _contiguous_row_ranges(row_numbers):
+    """Convert sorted 1-based row numbers into inclusive contiguous ranges."""
+    rows = sorted(set(int(r) for r in row_numbers))
+    if not rows:
+        return []
+    ranges = []
+    start = previous = rows[0]
+    for row in rows[1:]:
+        if row == previous + 1:
+            previous = row
+            continue
+        ranges.append((start, previous))
+        start = previous = row
+    ranges.append((start, previous))
+    return ranges
+
+
+def _replace_today_rows_safely(sheet, today, rows):
+    """Replace only today's rows without clearing historical data.
+
+    New rows are appended first. Only after the append succeeds are old rows
+    for the same date deleted. A mid-write failure can therefore create
+    duplicates for today, but cannot erase prior dates. The next successful run
+    cleans up any duplicate rows for today.
+    """
+    existing_dates = sheet.col_values(1)
+    old_today_rows = [
+        index
+        for index, value in enumerate(existing_dates, start=1)
+        if index > 1 and str(value).strip() == today
+    ]
+
+    sheet.append_rows(rows, value_input_option="RAW")
+
+    # Delete bottom-up so earlier row numbers remain stable while rows shift.
+    for start, end in reversed(_contiguous_row_ranges(old_today_rows)):
+        sheet.delete_rows(start, end)
+
+    return len(old_today_rows)
+
+
+def _sheet_client(creds_dict):
     scope = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive"
     ]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    return gspread.authorize(creds)
 
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(
-        creds_dict, scope
-    )
 
-    client = gspread.authorize(creds)
+def _as_text(row, column):
+    value = row.get(column, "")
+    return str(value) if pd.notna(value) else ""
 
-    spreadsheet = client.open("portfolio_data")
-    sheet = spreadsheet.worksheet("Daily_Log")
 
-    today = datetime.now(
-        ZoneInfo("Asia/Tokyo")
-    ).strftime("%Y-%m-%d")
+def _as_float(row, column, default=0.0):
+    value = pd.to_numeric(pd.Series([row.get(column, default)]), errors="coerce").iloc[0]
+    return float(value) if pd.notna(value) else float(default)
+
+
+def save_daily_log_detail(df, creds_dict):
+    client = _sheet_client(creds_dict)
+    sheet = client.open("portfolio_data").worksheet("Daily_Log")
+
+    today = datetime.now(ZoneInfo("Asia/Tokyo")).strftime("%Y-%m-%d")
+    rows = []
+    for _, r in df.iterrows():
+        rows.append([
+            today,
+            _as_text(r, "ticker"),
+            _as_text(r, "display_name"),
+            _as_text(r, "asset_class"),
+            _as_text(r, "sector"),
+            _as_float(r, "value_jpy"),
+        ])
+
+    replaced = _replace_today_rows_safely(sheet, today, rows)
+    return f"{len(rows)} rows saved; replaced {replaced} rows for {today}"
+
+
+def save_daily_log_v2(df, creds_dict):
+    """Save a detailed daily snapshot for future attribution analysis.
+
+    The legacy Daily_Log remains the canonical source for the existing
+    two-date comparison UI. Daily_Log_V2 starts collecting richer snapshots
+    without changing or reinterpreting historical Daily_Log rows.
+    """
+    client = _sheet_client(creds_dict)
+    sheet = client.open("portfolio_data").worksheet("Daily_Log_V2")
+
+    now = datetime.now(ZoneInfo("Asia/Tokyo"))
+    today = now.strftime("%Y-%m-%d")
+    snapshot_at = now.isoformat()
 
     rows = []
     for _, r in df.iterrows():
         rows.append([
             today,
-            str(r["ticker"]) if pd.notna(r["ticker"]) else "",
-            str(r["display_name"]) if pd.notna(r["display_name"]) else "",
-            str(r["asset_class"]) if pd.notna(r["asset_class"]) else "",
-            str(r["sector"]) if pd.notna(r["sector"]) else "",
-            float(r["value_jpy"]) if pd.notna(r["value_jpy"]) else 0
+            snapshot_at,
+            _as_text(r, "owner"),
+            _as_text(r, "account_type"),
+            _as_text(r, "ticker"),
+            _as_text(r, "display_name"),
+            _as_text(r, "asset_class"),
+            _as_text(r, "sector"),
+            _as_text(r, "currency"),
+            _as_text(r, "instrument_type"),
+            _as_text(r, "fund_code"),
+            _as_text(r, "product_name"),
+            _as_float(r, "price_unit", 1.0),
+            _as_float(r, "quantity"),
+            _as_float(r, "price"),
+            _as_float(r, "fx_to_jpy", 1.0),
+            _as_float(r, "value_jpy"),
+            _as_float(r, "cost_basis_jpy"),
+            _as_text(r, "purpose"),
+            _as_text(r, "role"),
+            _as_float(r, "day_diff_pct"),
         ])
 
-    existing_data = sheet.get_all_values()
-
-    filtered_data = [
-        row for row in existing_data
-        if len(row) == 0 or row[0] != today
-    ]
-
-    sheet.clear()
-    sheet.update(filtered_data + rows)
-
-    return f"{len(rows)} rows saved (overwrite mode)"
+    replaced = _replace_today_rows_safely(sheet, today, rows)
+    return f"Daily_Log_V2: {len(rows)} rows saved; replaced {replaced} rows for {today}"
 
 def daily_log_migration_names(df_log, start_date, end_date):
     """Find ETF-proxy -> native-fund changes across successive logged dates."""
