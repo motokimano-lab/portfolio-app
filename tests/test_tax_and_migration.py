@@ -5,7 +5,10 @@ from datetime import date
 import pandas as pd
 
 from dividend_tax import calc_after_tax_dividend, normalize_account_type
-from functions import normalize_positions, compare_portfolio, compare_latest_logs, save_daily_log_detail
+from functions import (
+    normalize_positions, compare_portfolio, compare_latest_logs,
+    save_daily_log_detail, save_daily_log_v2, DAILY_LOG_V2_HEADERS
+)
 
 
 class TaxAndMigrationTests(unittest.TestCase):
@@ -99,33 +102,113 @@ class TaxAndMigrationTests(unittest.TestCase):
         self.assertAlmostEqual(sp, -0.35)
         self.assertEqual(losers.iloc[0].display_name, 'BBB')
 
-    def test_writer_six_columns_and_today_replacement(self):
+    def test_writer_replaces_only_today_without_clearing_history(self):
         # Local double only: no real client and no Google Sheets mutation.
         from datetime import datetime
         from zoneinfo import ZoneInfo
         today=datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d')
         header=['date','ticker','display_name','asset_class','sector','value_jpy']
         old=['2026-01-01','VOO','SP500','米国株','投信','100']
+        current=[today,'VOO','SP500','米国株','投信','110']
+
         class Sheet:
-            cleared=False
-            saved=None
-            def get_all_values(self):return [header,old,[today,'VOO','SP500','米国株','投信','110']]
-            def clear(self):self.cleared=True
-            def update(self,values):self.saved=values
+            def __init__(self):
+                self.rows=[header,old,current]
+                self.cleared=False
+            def col_values(self,column):
+                return [row[0] for row in self.rows if row]
+            def append_rows(self,rows,value_input_option=None):
+                self.rows.extend(rows)
+            def delete_rows(self,start,end=None):
+                end=start if end is None else end
+                del self.rows[start-1:end]
+            def clear(self):
+                self.cleared=True
+                raise AssertionError('historical sheet must never be cleared')
+
         sheet=Sheet()
         class Client:
             def open(self,name):return self
             def worksheet(self,name):return sheet
+
         frame=pd.DataFrame([dict(ticker='MF:03311187',display_name='SP500',
                                  asset_class='米国株',sector='投信',value_jpy=120)])
         with patch('functions.ServiceAccountCredentials.from_json_keyfile_dict',return_value=object()), \
              patch('functions.gspread.authorize',return_value=Client()):
-            save_daily_log_detail(frame,{})
-        self.assertTrue(sheet.cleared)
-        self.assertEqual(sheet.saved[:2],[header,old])
-        self.assertEqual(sheet.saved[2],[today,'MF:03311187','SP500','米国株','投信',120.0])
-        self.assertEqual(len(sheet.saved),3)
-        self.assertTrue(all(len(row)==6 for row in sheet.saved))
+            result=save_daily_log_detail(frame,{})
+
+        self.assertFalse(sheet.cleared)
+        self.assertEqual(sheet.rows[0],header)
+        self.assertEqual(sheet.rows[1],old)
+        self.assertEqual(sheet.rows[2],[today,'MF:03311187','SP500','米国株','投信',120.0])
+        self.assertEqual(len(sheet.rows),3)
+        self.assertIn('replaced 1 rows',result)
+
+    def test_writer_append_failure_preserves_existing_today(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        today=datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d')
+        header=['date','ticker','display_name','asset_class','sector','value_jpy']
+        current=[today,'VOO','SP500','米国株','投信','110']
+
+        class Sheet:
+            def __init__(self):self.rows=[header,current]
+            def col_values(self,column):return [row[0] for row in self.rows]
+            def append_rows(self,rows,value_input_option=None):raise RuntimeError('network')
+            def delete_rows(self,start,end=None):raise AssertionError('must not delete after failed append')
+
+        sheet=Sheet()
+        class Client:
+            def open(self,name):return self
+            def worksheet(self,name):return sheet
+
+        frame=pd.DataFrame([dict(ticker='VOO',display_name='SP500',
+                                 asset_class='米国株',sector='投信',value_jpy=120)])
+        with patch('functions.ServiceAccountCredentials.from_json_keyfile_dict',return_value=object()), \
+             patch('functions.gspread.authorize',return_value=Client()):
+            with self.assertRaises(RuntimeError):
+                save_daily_log_detail(frame,{})
+        self.assertEqual(sheet.rows,[header,current])
+
+    def test_v2_snapshot_keeps_legacy_comparison_separate(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        today=datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d')
+
+        class Sheet:
+            def __init__(self):self.rows=[DAILY_LOG_V2_HEADERS]
+            def col_values(self,column):return [row[0] for row in self.rows]
+            def append_rows(self,rows,value_input_option=None):self.rows.extend(rows)
+            def delete_rows(self,start,end=None):
+                end=start if end is None else end
+                del self.rows[start-1:end]
+
+        sheet=Sheet()
+        class Client:
+            def open(self,name):return self
+            def worksheet(self,name):
+                self.requested=name
+                return sheet
+
+        frame=pd.DataFrame([dict(
+            owner='元気',account_type='NISA',ticker='ABBV',display_name='ABBV',
+            asset_class='米国株',sector='医薬',currency='USD',instrument_type='',
+            fund_code='',product_name='',price_unit=1,quantity=10,price=200,
+            fx_to_jpy=150,value_jpy=300000,cost_basis_jpy=120000,
+            purpose='配当',role='core',day_diff_pct=1.25
+        )])
+        client=Client()
+        with patch('functions.ServiceAccountCredentials.from_json_keyfile_dict',return_value=object()), \
+             patch('functions.gspread.authorize',return_value=client):
+            result=save_daily_log_v2(frame,{})
+
+        self.assertEqual(client.requested,'Daily_Log_V2')
+        self.assertEqual(len(sheet.rows),2)
+        self.assertEqual(len(sheet.rows[1]),len(DAILY_LOG_V2_HEADERS))
+        self.assertEqual(sheet.rows[1][0],today)
+        self.assertEqual(sheet.rows[1][2:6],['元気','NISA','ABBV','ABBV'])
+        self.assertEqual(sheet.rows[1][15],150.0)
+        self.assertIn('Daily_Log_V2',result)
 
 
 if __name__ == '__main__':
