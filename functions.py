@@ -400,6 +400,8 @@ def prepare_base_dataframe(df, usd_jpy, vnd_jpy):
         lambda currency: usd_jpy if currency == "USD" else vnd_jpy if currency == "VND" else 1.0
     )
     df["cost_basis_jpy"] = df["quantity"] / df["price_unit"] * df["cost_price"] * df["fx_to_jpy"]
+    cash_mask = df["ticker"].astype(str).str.strip().str.upper().eq("CASH")
+    df.loc[cash_mask, "cost_basis_jpy"] = df.loc[cash_mask, "value_jpy"]
 
     df["sector_group"] = df["sector"].fillna("未分類")
 
@@ -591,6 +593,262 @@ def save_daily_log_v2(df, creds_dict):
 
     replaced = _replace_today_rows_safely(sheet, today, rows)
     return f"Daily_Log_V2: {len(rows)} rows saved; replaced {replaced} rows for {today}"
+
+
+ATTRIBUTION_ID_COLUMNS = [
+    "owner", "account_type", "ticker", "display_name", "asset_class", "sector",
+    "currency", "instrument_type", "fund_code", "product_name", "price_unit",
+    "purpose", "role",
+]
+
+
+def normalize_daily_log_v2(df):
+    """Normalize detailed snapshots used by the attribution engine."""
+    data = df.copy()
+    if data.empty:
+        return data
+
+    required = set(DAILY_LOG_V2_HEADERS)
+    missing = sorted(required - set(data.columns))
+    if missing:
+        raise ValueError("Daily_Log_V2 required columns missing: " + ", ".join(missing))
+
+    data["date"] = pd.to_datetime(data["date"], errors="coerce").dt.date
+    data = data[data["date"].notna()].copy()
+
+    text_columns = [
+        "owner", "account_type", "ticker", "display_name", "asset_class", "sector",
+        "currency", "instrument_type", "fund_code", "product_name", "purpose", "role",
+    ]
+    for column in text_columns:
+        data[column] = data[column].fillna("").astype(str).str.strip()
+
+    numeric_columns = [
+        "price_unit", "quantity", "price", "fx_to_jpy", "value_jpy",
+        "cost_basis_jpy", "day_diff_pct",
+    ]
+    for column in numeric_columns:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+
+    data["price_unit"] = data["price_unit"].fillna(1.0)
+    data["fx_to_jpy"] = data["fx_to_jpy"].fillna(1.0)
+    data["quantity"] = data["quantity"].fillna(0.0)
+    data["price"] = data["price"].fillna(0.0)
+    data["value_jpy"] = data["value_jpy"].fillna(0.0)
+
+    return data
+
+
+def _snapshot_positions(df_day):
+    """Aggregate duplicate account rows into stable attribution positions."""
+    if df_day.empty:
+        return pd.DataFrame()
+
+    group_columns = ATTRIBUTION_ID_COLUMNS
+    aggregated = (
+        df_day.groupby(group_columns, dropna=False, as_index=False)
+        .agg(
+            quantity=("quantity", "sum"),
+            price=("price", "first"),
+            fx_to_jpy=("fx_to_jpy", "first"),
+            value_jpy=("value_jpy", "sum"),
+            cost_basis_jpy=("cost_basis_jpy", "sum"),
+        )
+    )
+    return aggregated
+
+
+def _position_value(quantity, price, fx_to_jpy, price_unit):
+    unit = float(price_unit) if price_unit else 1.0
+    return float(quantity) / unit * float(price) * float(fx_to_jpy)
+
+
+def _shapley_position_effects(q0, p0, f0, q1, p1, f1, price_unit):
+    """Exact symmetric 3-factor decomposition for quantity, local price and FX.
+
+    Interaction terms are shared fairly across the three factors, so the
+    effects always add exactly to the JPY valuation change.
+    """
+    from itertools import permutations
+
+    old = {"quantity": float(q0), "market": float(p0), "fx": float(f0)}
+    new = {"quantity": float(q1), "market": float(p1), "fx": float(f1)}
+    effects = {"quantity": 0.0, "market": 0.0, "fx": 0.0}
+
+    for order in permutations(("quantity", "market", "fx")):
+        state = old.copy()
+        before = _position_value(
+            state["quantity"], state["market"], state["fx"], price_unit
+        )
+        for factor in order:
+            state[factor] = new[factor]
+            after = _position_value(
+                state["quantity"], state["market"], state["fx"], price_unit
+            )
+            effects[factor] += after - before
+            before = after
+
+    divisor = 6.0
+    return {key: value / divisor for key, value in effects.items()}
+
+
+def attribution_between_snapshots(start_df, end_df, start_date, end_date):
+    """Return exact per-position JPY attribution between two snapshots."""
+    start = _snapshot_positions(start_df)
+    end = _snapshot_positions(end_df)
+
+    start_map = {}
+    end_map = {}
+
+    def key_for(row):
+        return tuple(row[column] for column in ATTRIBUTION_ID_COLUMNS)
+
+    for _, row in start.iterrows():
+        start_map[key_for(row)] = row
+    for _, row in end.iterrows():
+        end_map[key_for(row)] = row
+
+    records = []
+    for key in sorted(set(start_map) | set(end_map), key=lambda x: tuple(map(str, x))):
+        before = start_map.get(key)
+        after = end_map.get(key)
+        meta_source = after if after is not None else before
+
+        unit = float(meta_source["price_unit"] or 1.0)
+        if before is not None and after is not None:
+            before_unit = float(before["price_unit"] or 1.0)
+            after_unit = float(after["price_unit"] or 1.0)
+            if abs(before_unit - after_unit) > 1e-12:
+                raise ValueError(
+                    f"price_unit changed for {meta_source['ticker']}: "
+                    f"{before_unit} -> {after_unit}"
+                )
+            unit = before_unit
+
+        if before is None:
+            q0 = 0.0
+            p0 = float(after["price"])
+            f0 = float(after["fx_to_jpy"])
+            v0 = 0.0
+        else:
+            q0 = float(before["quantity"])
+            p0 = float(before["price"])
+            f0 = float(before["fx_to_jpy"])
+            v0 = float(before["value_jpy"])
+
+        if after is None:
+            q1 = 0.0
+            p1 = float(before["price"])
+            f1 = float(before["fx_to_jpy"])
+            v1 = 0.0
+        else:
+            q1 = float(after["quantity"])
+            p1 = float(after["price"])
+            f1 = float(after["fx_to_jpy"])
+            v1 = float(after["value_jpy"])
+
+        effects = _shapley_position_effects(q0, p0, f0, q1, p1, f1, unit)
+        total_change = v1 - v0
+        residual = total_change - sum(effects.values())
+        # Floating-point rounding only; assign residual to market so row totals
+        # remain exact at currency precision.
+        effects["market"] += residual
+
+        record = {
+            "start_date": start_date,
+            "end_date": end_date,
+            **{column: meta_source[column] for column in ATTRIBUTION_ID_COLUMNS},
+            "value_start": v0,
+            "value_end": v1,
+            "total_change": total_change,
+            "flow_effect": effects["quantity"],
+            "market_effect": effects["market"],
+            "fx_effect": effects["fx"],
+        }
+        record["market_fx_effect"] = record["market_effect"] + record["fx_effect"]
+        records.append(record)
+
+    return pd.DataFrame(records)
+
+
+def analyze_attribution_period(df_v2, start_date=None, end_date=None):
+    """Aggregate daily Shapley attribution over consecutive V2 snapshots.
+
+    The result is suitable for 1D/1W/1M/3M/YTD/1Y/ALL/custom views.  It sums
+    daily effects, so purchases and sales inside the period do not get mistaken
+    for investment performance.
+    """
+    data = normalize_daily_log_v2(df_v2)
+    empty_summary = {
+        "available_dates": [],
+        "actual_start": None,
+        "actual_end": None,
+        "total_change": 0.0,
+        "flow_effect": 0.0,
+        "market_effect": 0.0,
+        "fx_effect": 0.0,
+    }
+    if data.empty:
+        return pd.DataFrame(), pd.DataFrame(), empty_summary
+
+    dates = sorted(data["date"].unique())
+    if start_date is not None:
+        start_date = pd.Timestamp(start_date).date()
+        dates = [d for d in dates if d >= start_date]
+    if end_date is not None:
+        end_date = pd.Timestamp(end_date).date()
+        dates = [d for d in dates if d <= end_date]
+
+    empty_summary["available_dates"] = dates
+    if len(dates) < 2:
+        return pd.DataFrame(), pd.DataFrame(), empty_summary
+
+    pieces = []
+    for previous_date, current_date in zip(dates, dates[1:]):
+        before = data[data["date"].eq(previous_date)]
+        after = data[data["date"].eq(current_date)]
+        pieces.append(
+            attribution_between_snapshots(
+                before, after, previous_date, current_date
+            )
+        )
+
+    detail = pd.concat(pieces, ignore_index=True) if pieces else pd.DataFrame()
+    daily = (
+        detail.groupby("end_date", as_index=False)[
+            ["total_change", "flow_effect", "market_effect", "fx_effect"]
+        ]
+        .sum()
+        .rename(columns={"end_date": "date"})
+    )
+
+    summary = {
+        "available_dates": dates,
+        "actual_start": dates[0],
+        "actual_end": dates[-1],
+        "total_change": float(detail["total_change"].sum()),
+        "flow_effect": float(detail["flow_effect"].sum()),
+        "market_effect": float(detail["market_effect"].sum()),
+        "fx_effect": float(detail["fx_effect"].sum()),
+    }
+    return detail, daily, summary
+
+
+def summarize_attribution(detail, group_by):
+    """Aggregate attribution detail by one or more descriptive columns."""
+    if detail.empty:
+        return pd.DataFrame()
+
+    columns = [group_by] if isinstance(group_by, str) else list(group_by)
+    result = (
+        detail.groupby(columns, dropna=False, as_index=False)[
+            ["value_start", "value_end", "total_change", "flow_effect",
+             "market_effect", "fx_effect", "market_fx_effect"]
+        ]
+        .sum()
+    )
+    return result.sort_values("market_fx_effect", ascending=False).reset_index(drop=True)
+
 
 def daily_log_migration_names(df_log, start_date, end_date):
     """Find ETF-proxy -> native-fund changes across successive logged dates."""
