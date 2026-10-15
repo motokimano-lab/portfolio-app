@@ -118,6 +118,24 @@ def load_daily_log_detail():
 
     return df_log
 
+@st.cache_data(ttl=3600)
+def load_daily_log_v2():
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+
+    if "GCP_SERVICE_ACCOUNT" in os.environ:
+        creds_dict = json.loads(os.environ["GCP_SERVICE_ACCOUNT"])
+    else:
+        creds_dict = dict(st.secrets["gcp_service_account"])
+
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
+    spreadsheet = client.open("portfolio_data")
+    sheet = spreadsheet.worksheet("Daily_Log_V2")
+    return pd.DataFrame(sheet.get_all_records())
+
 # 為替取得
 usd_jpy, usd_error = get_fx("JPY=X", 150)
 vnd_jpy, vnd_error = get_fx("VNDJPY=X", 0.006)
@@ -212,8 +230,9 @@ if st.query_params.get("auto_save") == "1":
     # --- 保存 ---
     creds_dict = dict(st.secrets["gcp_service_account"])
     result = save_daily_log_detail(df, creds_dict)
+    detail_result = functions.save_daily_log_v2(df, creds_dict)
 
-    st.write("AUTO SAVE DONE:", result)
+    st.write("AUTO SAVE DONE:", result, detail_result)
     print("AUTO SAVE DONE:", result)
 
     st.stop()
@@ -383,6 +402,7 @@ if st.sidebar.button("最新データを再取得"):
     #キャッシュなしなのでget_dividends.clear()
     
     load_daily_log_detail.clear()
+    load_daily_log_v2.clear()
 
     st.sidebar.success("最新データを再取得します")
 
@@ -910,6 +930,183 @@ else:
     st.info("まだログがありません")
 
 
+# ========= 資産増減の要因分析（Daily_Log_V2） =========
+st.header("🔎 資産増減の要因分析")
+
+df_log_v2 = load_daily_log_v2()
+
+if df_log_v2.empty:
+    st.info("Daily_Log_V2 の記録がまだありません。")
+else:
+    v2_dates = sorted(
+        pd.to_datetime(df_log_v2["date"], errors="coerce").dropna().dt.date.unique()
+    )
+
+    if len(v2_dates) < 2:
+        st.info(
+            "要因分析は2日分のDaily_Log_V2が貯まると開始します。"
+            f" 現在の記録開始日は {v2_dates[0]} です。"
+        )
+        st.caption(
+            "従来の資産推移・任意2日比較はDaily_Logを使うため、この待機期間でも今まで通り利用できます。"
+        )
+    else:
+        preset = st.radio(
+            "分析期間",
+            ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL", "任意"],
+            horizontal=True,
+            key="attribution_period",
+        )
+        latest_date = v2_dates[-1]
+
+        if preset == "1D":
+            selected_start = v2_dates[-2]
+            selected_end = latest_date
+        elif preset == "1W":
+            selected_start = (pd.Timestamp(latest_date) - pd.Timedelta(days=7)).date()
+            selected_end = latest_date
+        elif preset == "1M":
+            selected_start = (pd.Timestamp(latest_date) - pd.DateOffset(months=1)).date()
+            selected_end = latest_date
+        elif preset == "3M":
+            selected_start = (pd.Timestamp(latest_date) - pd.DateOffset(months=3)).date()
+            selected_end = latest_date
+        elif preset == "YTD":
+            selected_start = latest_date.replace(month=1, day=1)
+            selected_end = latest_date
+        elif preset == "1Y":
+            selected_start = (pd.Timestamp(latest_date) - pd.DateOffset(years=1)).date()
+            selected_end = latest_date
+        elif preset == "ALL":
+            selected_start = v2_dates[0]
+            selected_end = latest_date
+        else:
+            col_start, col_end = st.columns(2)
+            with col_start:
+                selected_start = st.selectbox(
+                    "V2開始日",
+                    v2_dates[:-1],
+                    index=max(0, len(v2_dates) - 2),
+                    key="attribution_custom_start",
+                )
+            with col_end:
+                end_candidates = [d for d in v2_dates if d > selected_start]
+                selected_end = st.selectbox(
+                    "V2終了日",
+                    end_candidates,
+                    index=len(end_candidates) - 1,
+                    key="attribution_custom_end",
+                )
+
+        detail_attr, daily_attr, attr = functions.analyze_attribution_period(
+            df_log_v2, selected_start, selected_end
+        )
+
+        if detail_attr.empty:
+            st.info("選択期間内に連続する2日分以上のV2データがありません。")
+        else:
+            actual_start = attr["actual_start"]
+            actual_end = attr["actual_end"]
+            st.caption(
+                f"実データ範囲: {actual_start} → {actual_end}。"
+                " 日次スナップショットを積み上げて計算しています。"
+            )
+
+            col_total, col_flow, col_market, col_fx = st.columns(4)
+            col_total.metric("総資産増減", f"{attr['total_change']:+,.0f} 円")
+            col_flow.metric("数量・資金/売買要因", f"{attr['flow_effect']:+,.0f} 円")
+            col_market.metric("市場・NAV要因", f"{attr['market_effect']:+,.0f} 円")
+            col_fx.metric("為替要因", f"{attr['fx_effect']:+,.0f} 円")
+
+            st.caption(
+                "3要因は交差項を公平に配分するShapley分解で、合計が総資産増減と一致します。"
+                " JPY建て投資信託の為替影響は基準価額（NAV）の中に含まれるため、"
+                "現時点では「市場・NAV要因」に含まれます。"
+            )
+
+            factor_df = pd.DataFrame({
+                "要因": ["数量・資金/売買", "市場・NAV", "為替"],
+                "寄与額": [attr["flow_effect"], attr["market_effect"], attr["fx_effect"]],
+            })
+            fig_factor = px.bar(factor_df, x="要因", y="寄与額", title="期間中の要因別寄与額")
+            fig_factor.update_layout(xaxis_title="", yaxis_title="円", margin=dict(t=45, l=10, r=10, b=10))
+            st.plotly_chart(fig_factor, use_container_width=True, key="attribution_factors")
+
+            if len(daily_attr) > 1:
+                daily_plot = daily_attr.rename(columns={
+                    "flow_effect": "数量・資金/売買",
+                    "market_effect": "市場・NAV",
+                    "fx_effect": "為替",
+                }).melt(
+                    id_vars=["date"],
+                    value_vars=["数量・資金/売買", "市場・NAV", "為替"],
+                    var_name="要因",
+                    value_name="寄与額",
+                )
+                fig_daily = px.bar(daily_plot, x="date", y="寄与額", color="要因", barmode="relative", title="日次の要因別寄与")
+                fig_daily.update_layout(xaxis_title="", yaxis_title="円", margin=dict(t=45, l=10, r=10, b=10))
+                st.plotly_chart(fig_daily, use_container_width=True, key="attribution_daily")
+
+            asset_attr = functions.summarize_attribution(detail_attr, "asset_class")
+            sector_attr = functions.summarize_attribution(detail_attr, "sector")
+            name_attr = functions.summarize_attribution(detail_attr, "display_name")
+
+            def _format_attr_table(frame, label_column, label_name, limit=None):
+                view = frame.copy()
+                view[label_column] = view[label_column].replace("", "未分類")
+                view = view.rename(columns={
+                    label_column: label_name,
+                    "market_effect": "市場・NAV寄与",
+                    "fx_effect": "為替寄与",
+                    "market_fx_effect": "市場+為替寄与",
+                    "flow_effect": "数量・資金/売買",
+                    "total_change": "総増減",
+                })
+                columns = [label_name, "市場・NAV寄与", "為替寄与", "市場+為替寄与", "数量・資金/売買", "総増減"]
+                if limit is not None:
+                    view = view.head(limit)
+                return view[columns]
+
+            st.subheader("📦 アセットクラス別の寄与")
+            st.dataframe(
+                _format_attr_table(asset_attr, "asset_class", "アセットクラス").style.format({
+                    "市場・NAV寄与": "{:+,.0f}", "為替寄与": "{:+,.0f}",
+                    "市場+為替寄与": "{:+,.0f}", "数量・資金/売買": "{:+,.0f}", "総増減": "{:+,.0f}",
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            col_sector, col_name = st.columns(2)
+            with col_sector:
+                st.subheader("🏭 セクター寄与 TOP")
+                sector_display = sector_attr.reindex(
+                    sector_attr["market_fx_effect"].abs().sort_values(ascending=False).index
+                )
+                st.dataframe(
+                    _format_attr_table(sector_display, "sector", "セクター", limit=10).style.format({
+                        "市場・NAV寄与": "{:+,.0f}", "為替寄与": "{:+,.0f}",
+                        "市場+為替寄与": "{:+,.0f}", "数量・資金/売買": "{:+,.0f}", "総増減": "{:+,.0f}",
+                    }),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            with col_name:
+                st.subheader("🏅 銘柄寄与 TOP")
+                name_display = name_attr.reindex(
+                    name_attr["market_fx_effect"].abs().sort_values(ascending=False).index
+                )
+                st.dataframe(
+                    _format_attr_table(name_display, "display_name", "銘柄", limit=10).style.format({
+                        "市場・NAV寄与": "{:+,.0f}", "為替寄与": "{:+,.0f}",
+                        "市場+為替寄与": "{:+,.0f}", "数量・資金/売買": "{:+,.0f}", "総増減": "{:+,.0f}",
+                    }),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+
 # --- (3) 資産額の表 ---
 st.subheader("📝 保有資産一覧")
 st.dataframe(df_filtered[["ticker", "display_name", "quantity", "price", "value_jpy", "profit_pct"]].style.format({"profit_pct": "{:.2f}%", "value_jpy": "{:,.0f}"}))
@@ -971,9 +1168,11 @@ if st.button("📅 今日の資産を記録"):
 
         # 👇 引数に渡す
         result = save_daily_log_detail(df, creds_dict)
+        detail_result = functions.save_daily_log_v2(df, creds_dict)
     load_daily_log_detail.clear()
+    load_daily_log_v2.clear()
 
-    st.success(result)
+    st.success(result + " / " + detail_result)
     
 st.header("📊 期間比較（成長分析）")
 

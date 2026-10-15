@@ -7,7 +7,8 @@ import pandas as pd
 from dividend_tax import calc_after_tax_dividend, normalize_account_type
 from functions import (
     normalize_positions, compare_portfolio, compare_latest_logs,
-    save_daily_log_detail, save_daily_log_v2, DAILY_LOG_V2_HEADERS
+    save_daily_log_detail, save_daily_log_v2, DAILY_LOG_V2_HEADERS,
+    analyze_attribution_period, summarize_attribution
 )
 
 
@@ -169,6 +170,81 @@ class TaxAndMigrationTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 save_daily_log_detail(frame,{})
         self.assertEqual(sheet.rows,[header,current])
+
+    def test_cash_cost_basis_is_not_balance_squared(self):
+        frame = pd.DataFrame([dict(
+            ticker='CASH', currency='USD', quantity=5000, cost_price=5000,
+            price=1, price_unit=1, sector='CASH'
+        )])
+        result = normalize_positions(frame)
+        result['price'] = 1
+        from functions import prepare_base_dataframe
+        prepared = prepare_base_dataframe(result, 150, 0.006)
+        self.assertEqual(prepared.iloc[0].value_jpy, 750000)
+        self.assertEqual(prepared.iloc[0].cost_basis_jpy, 750000)
+
+    def test_attribution_exactly_splits_market_fx_and_flow(self):
+        columns=DAILY_LOG_V2_HEADERS
+        rows=[
+            ['2026-10-15','x','元気','特定','AAA','AAA','米国株','Tech','USD','','','',1,10,100,150,150000,100000,'成長','',0],
+            ['2026-10-15','x','元気','VCB','CASH','USD','現金・債券','CASH','USD','','','',1,1000,1,150,150000,150000,'現金','',0],
+            ['2026-10-16','x','元気','特定','AAA','AAA','米国株','Tech','USD','','','',1,12,110,155,204600,120000,'成長','',10],
+            ['2026-10-16','x','元気','VCB','CASH','USD','現金・債券','CASH','USD','','','',1,1200,1,155,186000,186000,'現金','',0],
+        ]
+        detail,daily,summary=analyze_attribution_period(pd.DataFrame(rows,columns=columns))
+        self.assertAlmostEqual(summary['total_change'],90600)
+        self.assertAlmostEqual(
+            summary['flow_effect']+summary['market_effect']+summary['fx_effect'],
+            summary['total_change'],
+            places=6,
+        )
+        cash=detail.loc[detail.ticker.eq('CASH')].iloc[0]
+        self.assertAlmostEqual(cash.market_effect,0)
+        self.assertGreater(cash.flow_effect,0)
+        self.assertGreater(cash.fx_effect,0)
+        stock=detail.loc[detail.ticker.eq('AAA')].iloc[0]
+        self.assertGreater(stock.flow_effect,0)
+        self.assertGreater(stock.market_effect,0)
+        self.assertGreater(stock.fx_effect,0)
+        self.assertEqual(len(daily),1)
+
+    def test_new_position_is_flow_not_fake_market_gain(self):
+        columns=DAILY_LOG_V2_HEADERS
+        rows=[
+            ['2026-10-15','x','元気','楽天銀行','CASH','JPY','現金・債券','CASH','JPY','','','',1,1000000,1,1,1000000,1000000,'現金','',0],
+            ['2026-10-16','x','元気','楽天銀行','CASH','JPY','現金・債券','CASH','JPY','','','',1,500000,1,1,500000,500000,'現金','',0],
+            ['2026-10-16','x','元気','特定','NEW','NEW','日本株','機械','JPY','','','',1,100,5000,1,500000,500000,'成長','',0],
+        ]
+        detail,_,summary=analyze_attribution_period(pd.DataFrame(rows,columns=columns))
+        new=detail.loc[detail.ticker.eq('NEW')].iloc[0]
+        self.assertAlmostEqual(new.flow_effect,500000)
+        self.assertAlmostEqual(new.market_effect,0)
+        self.assertAlmostEqual(new.fx_effect,0)
+        self.assertAlmostEqual(summary['total_change'],0,places=6)
+
+    def test_period_attribution_sums_daily_and_groups_sector(self):
+        columns=DAILY_LOG_V2_HEADERS
+        def row(day,ticker,name,sector,q,p,fx,value):
+            return [day,'x','元気','特定',ticker,name,'米国株',sector,'USD','','','',1,q,p,fx,value,0,'成長','',0]
+        frame=pd.DataFrame([
+            row('2026-10-15','AAA','AAA','Tech',10,100,150,150000),
+            row('2026-10-15','BBB','BBB','Bank',10,100,150,150000),
+            row('2026-10-16','AAA','AAA','Tech',10,105,150,157500),
+            row('2026-10-16','BBB','BBB','Bank',10,98,150,147000),
+            row('2026-10-17','AAA','AAA','Tech',10,110,152,167200),
+            row('2026-10-17','BBB','BBB','Bank',10,99,152,150480),
+        ],columns=columns)
+        detail,daily,summary=analyze_attribution_period(frame)
+        self.assertEqual(len(daily),2)
+        self.assertEqual(summary['actual_start'].isoformat(),'2026-10-15')
+        self.assertEqual(summary['actual_end'].isoformat(),'2026-10-17')
+        grouped=summarize_attribution(detail,'sector')
+        self.assertEqual(set(grouped.sector),{'Tech','Bank'})
+        self.assertAlmostEqual(
+            grouped.total_change.sum(),
+            summary['total_change'],
+            places=6,
+        )
 
     def test_v2_snapshot_keeps_legacy_comparison_separate(self):
         from datetime import datetime
