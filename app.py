@@ -230,8 +230,9 @@ if st.query_params.get("auto_save") == "1":
     # --- 保存 ---
     creds_dict = dict(st.secrets["gcp_service_account"])
     result = save_daily_log_detail(df, creds_dict)
+    detail_result = functions.save_daily_log_v2(df, creds_dict)
 
-    st.write("AUTO SAVE DONE:", result)
+    st.write("AUTO SAVE DONE:", result, detail_result)
     print("AUTO SAVE DONE:", result)
 
     st.stop()
@@ -962,7 +963,7 @@ else:
             selected_start = v2_dates[-2]
             selected_end = latest_date
         elif preset == "1W":
-            selected_start = latest_date - pd.Timedelta(days=7)
+            selected_start = (pd.Timestamp(latest_date) - pd.Timedelta(days=7)).date()
             selected_end = latest_date
         elif preset == "1M":
             selected_start = (pd.Timestamp(latest_date) - pd.DateOffset(months=1)).date()
@@ -1167,10 +1168,11 @@ if st.button("📅 今日の資産を記録"):
 
         # 👇 引数に渡す
         result = save_daily_log_detail(df, creds_dict)
+        detail_result = functions.save_daily_log_v2(df, creds_dict)
     load_daily_log_detail.clear()
     load_daily_log_v2.clear()
 
-    st.success(result)
+    st.success(result + " / " + detail_result)
     
 st.header("📊 期間比較（成長分析）")
 
