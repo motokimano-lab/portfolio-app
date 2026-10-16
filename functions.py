@@ -463,7 +463,7 @@ def build_current_market_movers(df, top_n=10):
     return gainers, losers
 
 
-ATTRIBUTION_SCHEMA_VERSION = 4
+ATTRIBUTION_SCHEMA_VERSION = 5
 
 
 DAILY_LOG_V2_HEADERS = [
@@ -471,7 +471,9 @@ DAILY_LOG_V2_HEADERS = [
     "asset_class", "sector", "currency", "instrument_type", "fund_code",
     "product_name", "price_unit", "quantity", "price", "fx_to_jpy",
     "value_jpy", "cost_basis_jpy", "purpose", "role", "day_diff_pct",
-    "fund_base_date", "proxy_ticker"
+    "fund_base_date", "proxy_ticker", "dividend_forecast_per_unit",
+    "annual_div_forecast_jpy", "after_tax_div_forecast_jpy",
+    "dividend_forecast_source"
 ]
 
 
@@ -581,6 +583,32 @@ def save_daily_log_v2(df, creds_dict, fund_status=None):
         fund_code = _as_text(r, "fund_code")
         fund_record = status_by_code.get(fund_code, {})
         spec = FUND_SPECS.get(fund_code, {})
+        quantity = _as_float(r, "quantity")
+        price_unit = _as_float(r, "price_unit", 1.0) or 1.0
+        fx_to_jpy = _as_float(r, "fx_to_jpy", 1.0) or 1.0
+        dividend_forecast_per_unit = _as_float(
+            r, "dividend_forecast_per_share"
+        )
+        annual_div_forecast_jpy = (
+            quantity / price_unit
+            * dividend_forecast_per_unit
+            * fx_to_jpy
+        )
+        tax_row = {
+            "annual_div_jpy": annual_div_forecast_jpy,
+            "ticker": _as_text(r, "ticker"),
+            "currency": _as_text(r, "currency"),
+            "account_type": _as_text(r, "account_type"),
+            "instrument_type": _as_text(r, "instrument_type"),
+            "foreign_tax_adjustment": bool(
+                r.get("foreign_tax_adjustment", False)
+            ),
+            "underlying_foreign_tax_rate": _as_float(
+                r, "underlying_foreign_tax_rate", 0.0
+            ),
+        }
+        after_tax_div_forecast_jpy = calc_after_tax_dividend(tax_row)
+
         rows.append([
             today,
             snapshot_at,
@@ -594,10 +622,10 @@ def save_daily_log_v2(df, creds_dict, fund_status=None):
             _as_text(r, "instrument_type"),
             fund_code,
             _as_text(r, "product_name"),
-            _as_float(r, "price_unit", 1.0),
-            _as_float(r, "quantity"),
+            price_unit,
+            quantity,
             _as_float(r, "price"),
-            _as_float(r, "fx_to_jpy", 1.0),
+            fx_to_jpy,
             _as_float(r, "value_jpy"),
             _as_float(r, "cost_basis_jpy"),
             _as_text(r, "purpose"),
@@ -605,6 +633,10 @@ def save_daily_log_v2(df, creds_dict, fund_status=None):
             _as_float(r, "day_diff_pct"),
             str(fund_record.get("base_date") or ""),
             str(spec.get("attribution_proxy") or ""),
+            dividend_forecast_per_unit,
+            annual_div_forecast_jpy,
+            after_tax_div_forecast_jpy,
+            _as_text(r, "dividend_forecast_source"),
         ])
 
     replaced = _replace_today_rows_safely(sheet, today, rows)
@@ -626,11 +658,21 @@ def normalize_daily_log_v2(df):
 
     # These columns were added after V2 started. Treat them as optional for
     # backwards compatibility with the first snapshots.
-    for column in ["fund_base_date", "proxy_ticker"]:
+    text_optional = [
+        "fund_base_date", "proxy_ticker", "dividend_forecast_source"
+    ]
+    numeric_optional = [
+        "dividend_forecast_per_unit", "annual_div_forecast_jpy",
+        "after_tax_div_forecast_jpy",
+    ]
+    for column in text_optional:
         if column not in data.columns:
             data[column] = ""
+    for column in numeric_optional:
+        if column not in data.columns:
+            data[column] = float("nan")
 
-    required = set(DAILY_LOG_V2_HEADERS) - {"fund_base_date", "proxy_ticker"}
+    required = set(DAILY_LOG_V2_HEADERS) - set(text_optional) - set(numeric_optional)
     missing = sorted(required - set(data.columns))
     if missing:
         raise ValueError("Daily_Log_V2 required columns missing: " + ", ".join(missing))
@@ -641,14 +683,15 @@ def normalize_daily_log_v2(df):
     text_columns = [
         "owner", "account_type", "ticker", "display_name", "asset_class", "sector",
         "currency", "instrument_type", "fund_code", "product_name", "purpose", "role",
-        "fund_base_date", "proxy_ticker",
+        "fund_base_date", "proxy_ticker", "dividend_forecast_source",
     ]
     for column in text_columns:
         data[column] = data[column].fillna("").astype(str).str.strip()
 
     numeric_columns = [
         "price_unit", "quantity", "price", "fx_to_jpy", "value_jpy",
-        "cost_basis_jpy", "day_diff_pct",
+        "cost_basis_jpy", "day_diff_pct", "dividend_forecast_per_unit",
+        "annual_div_forecast_jpy", "after_tax_div_forecast_jpy",
     ]
     for column in numeric_columns:
         data[column] = pd.to_numeric(data[column], errors="coerce")
