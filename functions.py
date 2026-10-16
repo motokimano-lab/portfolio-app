@@ -467,7 +467,8 @@ DAILY_LOG_V2_HEADERS = [
     "date", "snapshot_at", "owner", "account_type", "ticker", "display_name",
     "asset_class", "sector", "currency", "instrument_type", "fund_code",
     "product_name", "price_unit", "quantity", "price", "fx_to_jpy",
-    "value_jpy", "cost_basis_jpy", "purpose", "role", "day_diff_pct"
+    "value_jpy", "cost_basis_jpy", "purpose", "role", "day_diff_pct",
+    "fund_base_date", "proxy_ticker"
 ]
 
 
@@ -551,7 +552,7 @@ def save_daily_log_detail(df, creds_dict):
     return f"{len(rows)} rows saved; replaced {replaced} rows for {today}"
 
 
-def save_daily_log_v2(df, creds_dict):
+def save_daily_log_v2(df, creds_dict, fund_status=None):
     """Save a detailed daily snapshot for future attribution analysis.
 
     The legacy Daily_Log remains the canonical source for the existing
@@ -565,8 +566,18 @@ def save_daily_log_v2(df, creds_dict):
     today = now.strftime("%Y-%m-%d")
     snapshot_at = now.isoformat()
 
+    from mutual_funds import FUND_SPECS
+
+    status_by_code = {}
+    for ticker, record in (fund_status or {}).items():
+        code = str(ticker).replace("MF:", "")
+        status_by_code[code] = record
+
     rows = []
     for _, r in df.iterrows():
+        fund_code = _as_text(r, "fund_code")
+        fund_record = status_by_code.get(fund_code, {})
+        spec = FUND_SPECS.get(fund_code, {})
         rows.append([
             today,
             snapshot_at,
@@ -578,7 +589,7 @@ def save_daily_log_v2(df, creds_dict):
             _as_text(r, "sector"),
             _as_text(r, "currency"),
             _as_text(r, "instrument_type"),
-            _as_text(r, "fund_code"),
+            fund_code,
             _as_text(r, "product_name"),
             _as_float(r, "price_unit", 1.0),
             _as_float(r, "quantity"),
@@ -589,6 +600,8 @@ def save_daily_log_v2(df, creds_dict):
             _as_text(r, "purpose"),
             _as_text(r, "role"),
             _as_float(r, "day_diff_pct"),
+            str(fund_record.get("base_date") or ""),
+            str(spec.get("attribution_proxy") or ""),
         ])
 
     replaced = _replace_today_rows_safely(sheet, today, rows)
