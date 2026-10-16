@@ -24,7 +24,7 @@ import functions
 # Streamlit can rerun app.py in the same Python process after a Git deploy while
 # an imported helper module remains cached. Reload only when a newly deployed
 # attribution helper is missing, so app.py and functions.py cannot get out of sync.
-if getattr(functions, "ATTRIBUTION_SCHEMA_VERSION", 0) != 3:
+if getattr(functions, "ATTRIBUTION_SCHEMA_VERSION", 0) != 4:
     import importlib
     functions = importlib.reload(functions)
 print(dir(functions))
@@ -145,6 +145,10 @@ def load_daily_log_v2():
 @st.cache_data(ttl=3600)
 def load_fund_reference_data(df_v2):
     return functions.build_fund_reference_data(df_v2)
+
+@st.cache_data(ttl=21600)
+def load_income_event_data(df_v2):
+    return functions.build_income_event_data(df_v2)
 
 # 為替取得
 usd_jpy, usd_error = get_fx("JPY=X", 150)
@@ -414,6 +418,7 @@ if st.sidebar.button("最新データを再取得"):
     load_daily_log_detail.clear()
     load_daily_log_v2.clear()
     load_fund_reference_data.clear()
+    load_income_event_data.clear()
 
     st.sidebar.success("最新データを再取得します")
 
@@ -1017,6 +1022,13 @@ else:
             df_log_v2, selected_start, selected_end, fund_reference
         )
 
+        income_events, income_warnings = load_income_event_data(df_log_v2)
+        if income_warnings:
+            with st.expander("配当・分配金データ取得の注意", expanded=False):
+                for income_warning in income_warnings:
+                    st.write("・" + income_warning)
+        detail_attr = functions.attach_income_effects(detail_attr, income_events)
+
         if detail_attr.empty:
             st.info("選択期間内に連続する2日分以上のV2データがありません。")
         else:
@@ -1074,26 +1086,54 @@ else:
                 st.plotly_chart(fig_daily, use_container_width=True, key="attribution_daily")
 
             twr_daily, twr_summary = functions.calculate_estimated_twr(detail_attr)
+            gross_daily, gross_total_return = functions.calculate_estimated_total_return_twr(
+                detail_attr, "income_effect_gross"
+            )
+            net_daily, net_total_return = functions.calculate_estimated_total_return_twr(
+                detail_attr, "income_effect_after_tax"
+            )
 
             st.subheader("📈 資金移動を除いた運用リターン")
-            if twr_summary["valid"]:
-                twr_col, pnl_col, flow_col, asset_change_col = st.columns(4)
-                twr_col.metric("推定TWR", f"{twr_summary['twr']:+.2%}")
-                pnl_col.metric("運用損益", f"{twr_summary['investment_effect']:+,.0f} 円")
-                flow_col.metric("資金・売買要因", f"{twr_summary['flow_effect']:+,.0f} 円")
-                simple_change = twr_summary["simple_asset_change"]
-                asset_change_col.metric(
-                    "総資産変化率",
-                    f"{simple_change:+.2%}" if simple_change is not None else "—",
+            if twr_summary["valid"] and gross_total_return["valid"] and net_total_return["valid"]:
+                price_col, gross_col, net_col, income_col = st.columns(4)
+                price_col.metric(
+                    "推定TWR（価格・NAV＋為替）",
+                    f"{twr_summary['twr']:+.2%}",
+                )
+                gross_col.metric(
+                    "配当込み推定TWR（税前）",
+                    f"{gross_total_return['twr']:+.2%}",
+                )
+                net_col.metric(
+                    "配当込み推定TWR（税引後参考）",
+                    f"{net_total_return['twr']:+.2%}",
+                )
+                gross_income = gross_total_return["income_effect"]
+                net_income = net_total_return["income_effect"]
+                income_col.metric(
+                    "期間配当・分配金推計",
+                    f"{gross_income:+,.0f} 円",
+                    f"税引後参考 {net_income:+,.0f} 円",
+                    delta_color="off",
                 )
 
                 if len(twr_daily) > 1:
-                    twr_plot = twr_daily.copy()
-                    twr_plot["累積TWR（%）"] = twr_plot["cumulative_twr"] * 100
+                    return_plot = twr_daily[["end_date", "cumulative_twr"]].rename(
+                        columns={"cumulative_twr": "価格・NAV＋為替"}
+                    )
+                    return_plot["配当込み（税前）"] = gross_daily["cumulative_twr"]
+                    return_plot["配当込み（税引後参考）"] = net_daily["cumulative_twr"]
+                    return_plot = return_plot.melt(
+                        id_vars=["end_date"],
+                        var_name="リターン",
+                        value_name="累積値",
+                    )
+                    return_plot["累積TWR（%）"] = return_plot["累積値"] * 100
                     fig_twr = px.line(
-                        twr_plot,
+                        return_plot,
                         x="end_date",
                         y="累積TWR（%）",
+                        color="リターン",
                         markers=True,
                         title="資金移動を補正した累積運用リターン",
                         labels={"end_date": "日付"},
@@ -1106,24 +1146,37 @@ else:
                     st.plotly_chart(
                         fig_twr,
                         use_container_width=True,
-                        key="attribution_twr",
+                        key="attribution_twr_total_return",
+                    )
+
+                if gross_income == 0:
+                    st.caption(
+                        "選択期間内に配当・分配金イベントがないため、配当込みTWRと価格ベースTWRは同じです。"
                     )
                 else:
-                    st.caption(f"1日リターン: {twr_summary['twr']:+.2%}")
+                    st.caption(
+                        "配当込みTWRは、株式・ETFの実際の配当イベントと、投資信託の実際の分配金履歴を"
+                        "保有数量へ掛けて推計しています。投信をETF配当で代用していません。"
+                    )
 
                 st.caption(
-                    "推定TWRは、日次の「数量・資金/売買要因」を資金フロー近似として、"
-                    "フローが日中の中間時点で発生したと仮定するModified Dietz方式で日次リターンを計算し、"
-                    "それを複利連結しています。入出金の時刻を記録していないため厳密TWRではなく推定値です。"
+                    "TWRは日次Modified Dietz近似です。入出金・売買の時刻を保存していないため、"
+                    "フローは日中中間で発生したと仮定して日次リターンを複利連結しています。"
+                    " 配当の権利確定日と売買が同日に重なる場合も、期首数量を使う推計です。"
                 )
-                st.warning(
-                    "現時点の推定TWRは価格/NAV・為替ベースです。実際に受け取った配当・分配金を"
-                    "イベントとして記録していないため、配当込みのTotal Returnとは一致しない場合があります。"
+                st.caption(
+                    "税前TWRは将来のベンチマーク比較用、税引後参考は口座種別・通貨・現在の税モデルを"
+                    "適用した個人向け参考値です。実際の証券口座入金額とは数円〜数百円程度ずれる場合があります。"
                 )
             else:
+                invalid_periods = max(
+                    twr_summary.get("invalid_periods", 0),
+                    gross_total_return.get("invalid_periods", 0),
+                    net_total_return.get("invalid_periods", 0),
+                )
                 st.warning(
                     "選択期間では推定TWRを安全に計算できませんでした。"
-                    f" 無効な日次区間: {twr_summary['invalid_periods']}件"
+                    f" 無効な日次区間: {invalid_periods}件"
                 )
 
             asset_attr = functions.summarize_attribution(detail_attr, "asset_class")
@@ -1414,6 +1467,7 @@ if st.button("📅 今日の資産を記録"):
     load_daily_log_detail.clear()
     load_daily_log_v2.clear()
     load_fund_reference_data.clear()
+    load_income_event_data.clear()
 
     st.success(result + " / " + detail_result)
     
