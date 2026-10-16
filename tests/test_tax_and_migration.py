@@ -9,7 +9,9 @@ from functions import (
     normalize_positions, compare_portfolio, compare_latest_logs,
     save_daily_log_detail, save_daily_log_v2, DAILY_LOG_V2_HEADERS,
     analyze_attribution_period, summarize_attribution, calculate_estimated_twr,
-    attach_income_effects, calculate_estimated_total_return_twr
+    attach_income_effects, calculate_estimated_total_return_twr,
+    analyze_dividend_capacity_period, reconstruct_historical_attribution,
+    summarize_attribution_detail, build_history_gap_row
 )
 
 
@@ -185,7 +187,7 @@ class TaxAndMigrationTests(unittest.TestCase):
         self.assertEqual(prepared.iloc[0].cost_basis_jpy, 750000)
 
     def test_attribution_exactly_splits_market_fx_and_flow(self):
-        columns=DAILY_LOG_V2_HEADERS
+        columns=DAILY_LOG_V2_HEADERS[:23]
         rows=[
             ['2026-10-15','x','元気','特定','AAA','AAA','米国株','Tech','USD','','','',1,10,100,150,150000,100000,'成長','',0,'',''],
             ['2026-10-15','x','元気','VCB','CASH','USD','現金・債券','CASH','USD','','','',1,1000,1,150,150000,150000,'現金','',0,'',''],
@@ -214,7 +216,7 @@ class TaxAndMigrationTests(unittest.TestCase):
         self.assertEqual(len(daily),1)
 
     def test_new_position_is_flow_not_fake_market_gain(self):
-        columns=DAILY_LOG_V2_HEADERS
+        columns=DAILY_LOG_V2_HEADERS[:23]
         rows=[
             ['2026-10-15','x','元気','楽天銀行','CASH','JPY','現金・債券','CASH','JPY','','','',1,1000000,1,1,1000000,1000000,'現金','',0,'',''],
             ['2026-10-16','x','元気','楽天銀行','CASH','JPY','現金・債券','CASH','JPY','','','',1,500000,1,1,500000,500000,'現金','',0,'',''],
@@ -228,7 +230,7 @@ class TaxAndMigrationTests(unittest.TestCase):
         self.assertAlmostEqual(summary['total_change'],0,places=6)
 
     def test_us_fund_attribution_separates_proxy_fx_and_residual(self):
-        columns=DAILY_LOG_V2_HEADERS
+        columns=DAILY_LOG_V2_HEADERS[:23]
         nav0=10000.0
         nav1=nav0 * 1.02 * 1.01 * 0.999
         rows=[
@@ -274,7 +276,7 @@ class TaxAndMigrationTests(unittest.TestCase):
         )
 
     def test_us_fund_without_reference_falls_back_safely(self):
-        columns=DAILY_LOG_V2_HEADERS
+        columns=DAILY_LOG_V2_HEADERS[:23]
         rows=[
             ['2026-10-15','x','元気','NISA','MF:03311187','SP500','米国株','',
              'JPY','mutual_fund','03311187','eMAXIS Slim',10000,10000,10000,1,
@@ -292,7 +294,7 @@ class TaxAndMigrationTests(unittest.TestCase):
         self.assertFalse(summary['fund_fx_estimated'])
 
     def test_period_attribution_sums_daily_and_groups_sector(self):
-        columns=DAILY_LOG_V2_HEADERS
+        columns=DAILY_LOG_V2_HEADERS[:23]
         def row(day,ticker,name,sector,q,p,fx,value):
             return [day,'x','元気','特定',ticker,name,'米国株',sector,'USD','','','',1,q,p,fx,value,0,'成長','',0,'','']
         frame=pd.DataFrame([
@@ -436,6 +438,79 @@ class TaxAndMigrationTests(unittest.TestCase):
         self.assertAlmostEqual(summary['return_effect'], 0.0)
         self.assertAlmostEqual(summary['twr'], 0.0)
         self.assertAlmostEqual(daily.iloc[0].period_return, 0.0)
+
+    def test_reconstructed_history_splits_market_and_net_cash_flow(self):
+        log = pd.DataFrame([
+            ['2026-04-12','1111.T','TEST','日本株','機械',100.0],
+            ['2026-04-12','CASH','JPY','現金・債券','CASH',1000.0],
+            ['2026-04-13','1111.T','TEST','日本株','機械',110.0],
+            ['2026-04-13','CASH','JPY','現金・債券','CASH',1200.0],
+        ], columns=['date','ticker','display_name','asset_class','sector','value_jpy'])
+        refs = {
+            'valid_dates': [date(2026,4,12), date(2026,4,13)],
+            'prices': {
+                ('1111.T', date(2026,4,12)): 100.0,
+                ('1111.T', date(2026,4,13)): 110.0,
+            },
+            'fx': {},
+        }
+        detail, info = reconstruct_historical_attribution(
+            log, refs, start_date=date(2026,4,12),
+            end_date=date(2026,4,13), min_rows=1
+        )
+        stock = detail.loc[detail.ticker.eq('1111.T')].iloc[0]
+        cash = detail.loc[detail.ticker.eq('CASH')].iloc[0]
+        self.assertAlmostEqual(stock.market_effect, 10.0)
+        self.assertAlmostEqual(stock.flow_effect, 0.0)
+        self.assertAlmostEqual(cash.flow_effect, 200.0)
+        self.assertEqual(info['valid_dates'], [date(2026,4,12), date(2026,4,13)])
+        _, summary = summarize_attribution_detail(detail)
+        self.assertAlmostEqual(summary['flow_effect'], 200.0)
+        self.assertAlmostEqual(summary['market_effect'], 10.0)
+        self.assertAlmostEqual(summary['total_change'], 210.0)
+
+    def test_history_gap_is_explicit_residual_not_fake_flow(self):
+        old = pd.DataFrame([
+            ['2026-10-13','AAA','AAA','米国株','',100.0],
+            ['2026-10-13','CASH','JPY','現金・債券','CASH',50.0],
+        ], columns=['date','ticker','display_name','asset_class','sector','value_jpy'])
+        v2 = pd.DataFrame([
+            ['2026-10-15','x','','','AAA','AAA','米国株','','USD','','','',
+             1,1,1,1,170,0,'','',0,'','',0,0,0,''],
+        ], columns=DAILY_LOG_V2_HEADERS)
+        gap = build_history_gap_row(
+            old, v2, date(2026,10,13), date(2026,10,15)
+        )
+        self.assertEqual(gap.iloc[0].attribution_method, 'history_gap')
+        self.assertAlmostEqual(gap.iloc[0].total_change, 20.0)
+        self.assertAlmostEqual(gap.iloc[0].flow_effect, 0.0)
+        self.assertAlmostEqual(gap.iloc[0].residual_effect, 20.0)
+
+    def test_dividend_capacity_decomposition_exact(self):
+        rows = [
+            ['2026-10-17','x','元気','NISA','1928.T','積水','日本株','建設','JPY','',
+             '','',1,100,3000,1,300000,250000,'配当','',0,'','',
+             10.0,1000.0,1000.0,'run-rate'],
+            ['2026-10-18','x','元気','NISA','1928.T','積水','日本株','建設','JPY','',
+             '','',1,120,3100,1,372000,300000,'配当','',0,'','',
+             11.0,1320.0,1320.0,'run-rate'],
+        ]
+        frame = pd.DataFrame(rows, columns=DAILY_LOG_V2_HEADERS)
+        detail, summary = analyze_dividend_capacity_period(
+            frame, after_tax=True
+        )
+        self.assertEqual(summary['actual_start'], date(2026,10,17))
+        self.assertEqual(summary['actual_end'], date(2026,10,18))
+        self.assertAlmostEqual(summary['total_change'], 320.0)
+        self.assertGreater(summary['quantity_effect'], 0)
+        self.assertGreater(summary['dividend_effect'], 0)
+        self.assertAlmostEqual(summary['fx_effect'], 0.0)
+        self.assertAlmostEqual(
+            summary['quantity_effect'] + summary['dividend_effect'] + summary['fx_effect'],
+            summary['total_change'],
+            places=8,
+        )
+        self.assertEqual(len(detail), 1)
 
     def test_v2_snapshot_keeps_legacy_comparison_separate(self):
         from datetime import datetime

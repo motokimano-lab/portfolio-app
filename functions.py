@@ -463,7 +463,7 @@ def build_current_market_movers(df, top_n=10):
     return gainers, losers
 
 
-ATTRIBUTION_SCHEMA_VERSION = 4
+ATTRIBUTION_SCHEMA_VERSION = 5
 
 
 DAILY_LOG_V2_HEADERS = [
@@ -471,7 +471,9 @@ DAILY_LOG_V2_HEADERS = [
     "asset_class", "sector", "currency", "instrument_type", "fund_code",
     "product_name", "price_unit", "quantity", "price", "fx_to_jpy",
     "value_jpy", "cost_basis_jpy", "purpose", "role", "day_diff_pct",
-    "fund_base_date", "proxy_ticker"
+    "fund_base_date", "proxy_ticker", "dividend_forecast_per_unit",
+    "annual_div_forecast_jpy", "after_tax_div_forecast_jpy",
+    "dividend_forecast_source"
 ]
 
 
@@ -581,6 +583,32 @@ def save_daily_log_v2(df, creds_dict, fund_status=None):
         fund_code = _as_text(r, "fund_code")
         fund_record = status_by_code.get(fund_code, {})
         spec = FUND_SPECS.get(fund_code, {})
+        quantity = _as_float(r, "quantity")
+        price_unit = _as_float(r, "price_unit", 1.0) or 1.0
+        fx_to_jpy = _as_float(r, "fx_to_jpy", 1.0) or 1.0
+        dividend_forecast_per_unit = _as_float(
+            r, "dividend_forecast_per_share"
+        )
+        annual_div_forecast_jpy = (
+            quantity / price_unit
+            * dividend_forecast_per_unit
+            * fx_to_jpy
+        )
+        tax_row = {
+            "annual_div_jpy": annual_div_forecast_jpy,
+            "ticker": _as_text(r, "ticker"),
+            "currency": _as_text(r, "currency"),
+            "account_type": _as_text(r, "account_type"),
+            "instrument_type": _as_text(r, "instrument_type"),
+            "foreign_tax_adjustment": bool(
+                r.get("foreign_tax_adjustment", False)
+            ),
+            "underlying_foreign_tax_rate": _as_float(
+                r, "underlying_foreign_tax_rate", 0.0
+            ),
+        }
+        after_tax_div_forecast_jpy = calc_after_tax_dividend(tax_row)
+
         rows.append([
             today,
             snapshot_at,
@@ -594,10 +622,10 @@ def save_daily_log_v2(df, creds_dict, fund_status=None):
             _as_text(r, "instrument_type"),
             fund_code,
             _as_text(r, "product_name"),
-            _as_float(r, "price_unit", 1.0),
-            _as_float(r, "quantity"),
+            price_unit,
+            quantity,
             _as_float(r, "price"),
-            _as_float(r, "fx_to_jpy", 1.0),
+            fx_to_jpy,
             _as_float(r, "value_jpy"),
             _as_float(r, "cost_basis_jpy"),
             _as_text(r, "purpose"),
@@ -605,6 +633,10 @@ def save_daily_log_v2(df, creds_dict, fund_status=None):
             _as_float(r, "day_diff_pct"),
             str(fund_record.get("base_date") or ""),
             str(spec.get("attribution_proxy") or ""),
+            dividend_forecast_per_unit,
+            annual_div_forecast_jpy,
+            after_tax_div_forecast_jpy,
+            _as_text(r, "dividend_forecast_source"),
         ])
 
     replaced = _replace_today_rows_safely(sheet, today, rows)
@@ -626,11 +658,21 @@ def normalize_daily_log_v2(df):
 
     # These columns were added after V2 started. Treat them as optional for
     # backwards compatibility with the first snapshots.
-    for column in ["fund_base_date", "proxy_ticker"]:
+    text_optional = [
+        "fund_base_date", "proxy_ticker", "dividend_forecast_source"
+    ]
+    numeric_optional = [
+        "dividend_forecast_per_unit", "annual_div_forecast_jpy",
+        "after_tax_div_forecast_jpy",
+    ]
+    for column in text_optional:
         if column not in data.columns:
             data[column] = ""
+    for column in numeric_optional:
+        if column not in data.columns:
+            data[column] = float("nan")
 
-    required = set(DAILY_LOG_V2_HEADERS) - {"fund_base_date", "proxy_ticker"}
+    required = set(DAILY_LOG_V2_HEADERS) - set(text_optional) - set(numeric_optional)
     missing = sorted(required - set(data.columns))
     if missing:
         raise ValueError("Daily_Log_V2 required columns missing: " + ", ".join(missing))
@@ -641,14 +683,15 @@ def normalize_daily_log_v2(df):
     text_columns = [
         "owner", "account_type", "ticker", "display_name", "asset_class", "sector",
         "currency", "instrument_type", "fund_code", "product_name", "purpose", "role",
-        "fund_base_date", "proxy_ticker",
+        "fund_base_date", "proxy_ticker", "dividend_forecast_source",
     ]
     for column in text_columns:
         data[column] = data[column].fillna("").astype(str).str.strip()
 
     numeric_columns = [
         "price_unit", "quantity", "price", "fx_to_jpy", "value_jpy",
-        "cost_basis_jpy", "day_diff_pct",
+        "cost_basis_jpy", "day_diff_pct", "dividend_forecast_per_unit",
+        "annual_div_forecast_jpy", "after_tax_div_forecast_jpy",
     ]
     for column in numeric_columns:
         data[column] = pd.to_numeric(data[column], errors="coerce")
@@ -1005,6 +1048,78 @@ def attribution_between_snapshots(
     return pd.DataFrame(records)
 
 
+def summarize_attribution_detail(detail):
+    """Summarize already-computed attribution rows."""
+    empty_summary = {
+        "available_dates": [], "actual_start": None, "actual_end": None,
+        "total_change": 0.0, "flow_effect": 0.0, "market_effect": 0.0,
+        "fx_effect": 0.0, "residual_effect": 0.0, "investment_effect": 0.0,
+        "fund_fx_estimated": False,
+    }
+    if detail is None or detail.empty:
+        return pd.DataFrame(), empty_summary
+    work = detail.copy()
+    daily = (
+        work.groupby("end_date", as_index=False)[
+            ["total_change", "flow_effect", "market_effect", "fx_effect",
+             "residual_effect", "investment_effect"]
+        ].sum().rename(columns={"end_date": "date"})
+    )
+    starts = pd.to_datetime(work["start_date"], errors="coerce").dt.date.dropna()
+    ends = pd.to_datetime(work["end_date"], errors="coerce").dt.date.dropna()
+    available_dates = sorted(set(starts.tolist()) | set(ends.tolist()))
+    summary = {
+        "available_dates": available_dates,
+        "actual_start": min(starts) if not starts.empty else None,
+        "actual_end": max(ends) if not ends.empty else None,
+        "total_change": float(work["total_change"].sum()),
+        "flow_effect": float(work["flow_effect"].sum()),
+        "market_effect": float(work["market_effect"].sum()),
+        "fx_effect": float(work["fx_effect"].sum()),
+        "residual_effect": float(work["residual_effect"].sum()),
+        "investment_effect": float(work["investment_effect"].sum()),
+        "fund_fx_estimated": bool(
+            work.get("fund_fx_estimated", pd.Series(False, index=work.index)).fillna(False).any()
+        ),
+    }
+    return daily, summary
+
+
+def build_history_gap_row(
+    df_log, df_v2, historical_end, v2_start
+):
+    """Represent the legacy->V2 bridge as explicitly unclassified residual."""
+    if df_log is None or df_log.empty or df_v2 is None or df_v2.empty:
+        return pd.DataFrame()
+    old = df_log.copy()
+    old["date"] = pd.to_datetime(old["date"], errors="coerce").dt.date
+    old["value_jpy"] = pd.to_numeric(
+        old["value_jpy"].astype(str).str.replace(",", "", regex=False),
+        errors="coerce",
+    ).fillna(0.0)
+    v2 = normalize_daily_log_v2(df_v2)
+    historical_end = pd.Timestamp(historical_end).date()
+    v2_start = pd.Timestamp(v2_start).date()
+    old_value = float(old.loc[old["date"].eq(historical_end), "value_jpy"].sum())
+    new_value = float(v2.loc[v2["date"].eq(v2_start), "value_jpy"].sum())
+    if old_value <= 0 or new_value <= 0:
+        return pd.DataFrame()
+    change = new_value - old_value
+    row = {
+        "start_date": historical_end, "end_date": v2_start,
+        "owner": "", "account_type": "", "ticker": "HISTORY_GAP",
+        "display_name": "履歴切替/未分解", "asset_class": "未分解",
+        "sector": "履歴切替", "currency": "JPY", "instrument_type": "",
+        "fund_code": "", "product_name": "", "price_unit": 1.0,
+        "purpose": "", "role": "", "value_start": old_value,
+        "value_end": new_value, "total_change": change, "flow_effect": 0.0,
+        "market_effect": 0.0, "fx_effect": 0.0, "residual_effect": change,
+        "fund_fx_estimated": False, "attribution_method": "history_gap",
+        "market_group": "履歴切替/未分解", "fx_driver_currency": "JPY",
+        "market_fx_effect": 0.0, "investment_effect": change,
+    }
+    return pd.DataFrame([row])
+
 def analyze_attribution_period(
     df_v2, start_date=None, end_date=None, fund_reference=None
 ):
@@ -1087,6 +1202,449 @@ def summarize_attribution(detail, group_by):
     )
     return result.sort_values("investment_effect", ascending=False).reset_index(drop=True)
 
+
+HISTORICAL_RECONSTRUCTION_START = pd.Timestamp("2026-04-12").date()
+HISTORICAL_RECONSTRUCTION_END = pd.Timestamp("2026-10-13").date()
+
+
+def _historical_currency(ticker, display_name):
+    ticker = str(ticker or "").strip().upper()
+    display = str(display_name or "").strip().upper()
+    if ticker == "CASH":
+        return display if display in {"JPY", "USD", "VND"} else "JPY"
+    if ticker.endswith(".T") or ticker.endswith("-JPY"):
+        return "JPY"
+    return "USD"
+
+
+def _split_normalized_close(history):
+    """Raw close normalized for stock splits but not dividends."""
+    if history is None or history.empty or "Close" not in history.columns:
+        return pd.Series(dtype=float)
+    close = pd.to_numeric(history["Close"], errors="coerce")
+    splits = pd.to_numeric(
+        history.get("Stock Splits", pd.Series(0.0, index=history.index)),
+        errors="coerce",
+    ).fillna(0.0)
+    split_multiplier = splits.where((splits > 0) & (splits != 1), 1.0)
+    # A split-date close is already post-split, so only later splits adjust it.
+    future_splits = split_multiplier.iloc[::-1].cumprod().iloc[::-1]
+    future_splits = future_splits.shift(-1, fill_value=1.0)
+    normalized = close / future_splits
+    normalized = normalized.dropna()
+    normalized.index = pd.to_datetime(normalized.index)
+    return normalized
+
+
+def _bulk_history_frame(downloaded, ticker, ticker_count):
+    if downloaded is None or downloaded.empty:
+        return pd.DataFrame()
+    if isinstance(downloaded.columns, pd.MultiIndex):
+        level0 = downloaded.columns.get_level_values(0)
+        if ticker in level0:
+            return downloaded[ticker].copy()
+        # Some yfinance versions return price field first and ticker second.
+        level1 = downloaded.columns.get_level_values(1)
+        if ticker in level1:
+            return downloaded.xs(ticker, axis=1, level=1).copy()
+        return pd.DataFrame()
+    if ticker_count == 1:
+        return downloaded.copy()
+    return pd.DataFrame()
+
+
+def build_historical_reference_data(
+    df_log, start_date=HISTORICAL_RECONSTRUCTION_START,
+    end_date=HISTORICAL_RECONSTRUCTION_END, min_rows=50,
+):
+    """Fetch price/FX references for high-confidence legacy Daily_Log dates."""
+    log = df_log.copy()
+    if log.empty:
+        return {}, []
+    log["date"] = pd.to_datetime(log["date"], errors="coerce").dt.date
+    log["ticker"] = log["ticker"].fillna("").astype(str).str.strip().str.upper()
+    log = log[log["date"].notna()].copy()
+    start_date = pd.Timestamp(start_date).date()
+    end_date = pd.Timestamp(end_date).date()
+    log = log[log["date"].between(start_date, end_date)].copy()
+    if log.empty:
+        return {}, []
+
+    row_counts = log.groupby("date").size()
+    valid_dates = sorted(row_counts[row_counts >= int(min_rows)].index.tolist())
+    if len(valid_dates) < 2:
+        return {}, []
+
+    excluded_labels = {"USSTOCK", "JPSTOCK", "EESTOCK", "CRYPTO"}
+    tickers = sorted({
+        ticker for ticker in log["ticker"].unique().tolist()
+        if ticker and ticker != "CASH" and ticker not in excluded_labels
+    })
+    warnings = []
+    references = {"prices": {}, "fx": {}, "valid_dates": valid_dates}
+
+    fetch_start = pd.Timestamp(valid_dates[0]) - pd.Timedelta(days=10)
+    fetch_end = pd.Timestamp(valid_dates[-1]) + pd.Timedelta(days=2)
+    if tickers:
+        try:
+            downloaded = yf.download(
+                tickers, start=fetch_start.date(), end=fetch_end.date(),
+                actions=True, auto_adjust=False, group_by="ticker",
+                progress=False, threads=True,
+            )
+        except Exception as error:
+            downloaded = None
+            warnings.append(f"過去価格一括取得失敗: {type(error).__name__}")
+
+        for ticker in tickers:
+            frame = _bulk_history_frame(downloaded, ticker, len(tickers))
+            series = _split_normalized_close(frame)
+            if series.empty:
+                warnings.append(f"{ticker}: 過去価格なし")
+                continue
+            for log_date in valid_dates:
+                candidates = series[series.index.date < log_date]
+                if not candidates.empty:
+                    references["prices"][(ticker, log_date)] = float(candidates.iloc[-1])
+
+    fx_symbols = {"USD": "JPY=X", "VND": "VNDJPY=X"}
+    try:
+        fx_download = yf.download(
+            list(fx_symbols.values()), start=fetch_start.date(), end=fetch_end.date(),
+            actions=False, auto_adjust=False, group_by="ticker",
+            progress=False, threads=True,
+        )
+    except Exception as error:
+        fx_download = None
+        warnings.append(f"過去為替一括取得失敗: {type(error).__name__}")
+
+    for currency, symbol in fx_symbols.items():
+        frame = _bulk_history_frame(fx_download, symbol, len(fx_symbols))
+        if frame.empty or "Close" not in frame.columns:
+            warnings.append(f"{currency}/JPY: 過去為替なし")
+            continue
+        series = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+        series.index = pd.to_datetime(series.index)
+        for log_date in valid_dates:
+            candidates = series[series.index.date <= log_date]
+            if not candidates.empty:
+                references["fx"][(currency, log_date)] = float(candidates.iloc[-1])
+
+    return references, list(dict.fromkeys(warnings))
+
+
+def _legacy_market_fx_effects(value_start, market_ratio, fx_ratio):
+    """Two-factor Shapley split of a held position value change."""
+    v0 = float(value_start)
+    market_delta = float(market_ratio) - 1.0
+    fx_delta = float(fx_ratio) - 1.0
+    market_effect = v0 * market_delta * (1.0 + 0.5 * fx_delta)
+    fx_effect = v0 * fx_delta * (1.0 + 0.5 * market_delta)
+    return market_effect, fx_effect
+
+
+def reconstruct_historical_attribution(
+    df_log, references, start_date=HISTORICAL_RECONSTRUCTION_START,
+    end_date=HISTORICAL_RECONSTRUCTION_END, min_rows=50,
+):
+    """Reconstruct legacy attribution from saved JPY values plus price/FX history.
+
+    Internal trades normally net out at portfolio level because stock purchases
+    were recorded together with the corresponding cash reduction. The remaining
+    net flow therefore approximates salary/bonus/dividend/other external cash.
+    """
+    log = df_log.copy()
+    if log.empty:
+        return pd.DataFrame(), {"valid_dates": [], "warnings": []}
+    log["date"] = pd.to_datetime(log["date"], errors="coerce").dt.date
+    log["ticker"] = log["ticker"].fillna("").astype(str).str.strip().str.upper()
+    log["display_name"] = log["display_name"].fillna("").astype(str).str.strip()
+    log["asset_class"] = log["asset_class"].fillna("").astype(str).str.strip()
+    log["sector"] = log["sector"].fillna("").astype(str).str.strip()
+    log["value_jpy"] = pd.to_numeric(
+        log["value_jpy"].astype(str).str.replace(",", "", regex=False),
+        errors="coerce",
+    ).fillna(0.0)
+    start_date = pd.Timestamp(start_date).date()
+    end_date = pd.Timestamp(end_date).date()
+    log = log[log["date"].between(start_date, end_date)].copy()
+
+    row_counts = log.groupby("date").size()
+    valid_dates = sorted(row_counts[row_counts >= int(min_rows)].index.tolist())
+    if references and references.get("valid_dates"):
+        valid_reference_dates = set(references["valid_dates"])
+        valid_dates = [d for d in valid_dates if d in valid_reference_dates]
+    if len(valid_dates) < 2:
+        return pd.DataFrame(), {"valid_dates": valid_dates, "warnings": []}
+
+    grouped = (
+        log[log["date"].isin(valid_dates)]
+        .groupby(
+            ["date", "ticker", "display_name", "asset_class", "sector"],
+            dropna=False, as_index=False,
+        )["value_jpy"].sum()
+    )
+
+    pieces = []
+    warnings = []
+    for d0, d1 in zip(valid_dates, valid_dates[1:]):
+        before = grouped[grouped["date"].eq(d0)]
+        after = grouped[grouped["date"].eq(d1)]
+        key_cols = ["ticker", "display_name", "asset_class", "sector"]
+        before_map = {tuple(row[col] for col in key_cols): row for _, row in before.iterrows()}
+        after_map = {tuple(row[col] for col in key_cols): row for _, row in after.iterrows()}
+        for key in sorted(set(before_map) | set(after_map), key=lambda x: tuple(map(str, x))):
+            row0 = before_map.get(key)
+            row1 = after_map.get(key)
+            meta = row1 if row1 is not None else row0
+            ticker = str(meta["ticker"]).upper()
+            display = str(meta["display_name"])
+            asset_class = str(meta["asset_class"])
+            sector = str(meta["sector"])
+            v0 = float(row0["value_jpy"]) if row0 is not None else 0.0
+            v1 = float(row1["value_jpy"]) if row1 is not None else 0.0
+            currency = _historical_currency(ticker, display)
+            market_effect = 0.0
+            fx_effect = 0.0
+            flow_effect = 0.0
+            residual_effect = 0.0
+            method = "historical_reconstructed"
+
+            if row0 is None:
+                flow_effect = v1
+            elif row1 is None:
+                flow_effect = -v0
+            else:
+                if ticker == "CASH":
+                    market_ratio = 1.0
+                    market_known = True
+                else:
+                    p0 = references.get("prices", {}).get((ticker, d0))
+                    p1 = references.get("prices", {}).get((ticker, d1))
+                    market_known = p0 is not None and p1 is not None and p0 > 0
+                    market_ratio = (p1 / p0) if market_known else 1.0
+
+                if currency == "JPY":
+                    fx_ratio = 1.0
+                    fx_known = True
+                else:
+                    f0 = references.get("fx", {}).get((currency, d0))
+                    f1 = references.get("fx", {}).get((currency, d1))
+                    fx_known = f0 is not None and f1 is not None and f0 > 0
+                    fx_ratio = (f1 / f0) if fx_known else 1.0
+
+                if market_known and fx_known:
+                    market_effect, fx_effect = _legacy_market_fx_effects(
+                        v0, market_ratio, fx_ratio
+                    )
+                    flow_effect = v1 - v0 - market_effect - fx_effect
+                else:
+                    method = "historical_reconstructed_partial"
+                    if fx_known:
+                        fx_effect = v0 * (fx_ratio - 1.0)
+                    residual_effect = v1 - v0 - fx_effect
+                    warnings.append(f"{d0}→{d1} {ticker}: 市場参照不足")
+
+            market_group = (
+                "現金" if ticker == "CASH" else sector or asset_class or "未分類"
+            )
+            record = {
+                "start_date": d0, "end_date": d1,
+                "owner": "", "account_type": "", "ticker": ticker,
+                "display_name": display, "asset_class": asset_class,
+                "sector": sector, "currency": currency, "instrument_type": "",
+                "fund_code": "", "product_name": "", "price_unit": 1.0,
+                "purpose": "", "role": "",
+                "value_start": v0, "value_end": v1, "total_change": v1 - v0,
+                "flow_effect": flow_effect, "market_effect": market_effect,
+                "fx_effect": fx_effect, "residual_effect": residual_effect,
+                "fund_fx_estimated": False, "attribution_method": method,
+                "market_group": market_group,
+                "fx_driver_currency": currency,
+            }
+            record["market_fx_effect"] = market_effect + fx_effect
+            record["investment_effect"] = market_effect + fx_effect + residual_effect
+            pieces.append(record)
+
+    detail = pd.DataFrame(pieces)
+    return detail, {
+        "valid_dates": valid_dates,
+        "warnings": list(dict.fromkeys(warnings)),
+        "start": valid_dates[0] if valid_dates else None,
+        "end": valid_dates[-1] if valid_dates else None,
+        "method": "historical_reconstructed",
+    }
+
+def _shapley_dividend_capacity_effects(
+    q0, d0, f0, q1, d1, f1, price_unit
+):
+    """Exact symmetric decomposition of annual dividend capacity.
+
+    Factors are quantity, per-unit annual dividend run-rate, and FX.
+    Interaction terms are shared symmetrically so the three effects add exactly
+    to the change in annual JPY dividend capacity.
+    """
+    from itertools import permutations
+
+    old = {"quantity": float(q0), "dividend": float(d0), "fx": float(f0)}
+    new = {"quantity": float(q1), "dividend": float(d1), "fx": float(f1)}
+    effects = {"quantity": 0.0, "dividend": 0.0, "fx": 0.0}
+    unit = float(price_unit) if price_unit else 1.0
+
+    def value(state):
+        return state["quantity"] / unit * state["dividend"] * state["fx"]
+
+    orders = list(permutations(("quantity", "dividend", "fx")))
+    for order in orders:
+        state = old.copy()
+        before = value(state)
+        for factor in order:
+            state[factor] = new[factor]
+            after = value(state)
+            effects[factor] += after - before
+            before = after
+
+    divisor = float(len(orders))
+    return {key: value_ / divisor for key, value_ in effects.items()}
+
+
+def analyze_dividend_capacity_period(
+    df_v2, start_date=None, end_date=None, after_tax=True
+):
+    """Explain changes in annual dividend capacity between two V2 snapshots.
+
+    Endpoint annualized forecast is decomposed into quantity, per-unit dividend
+    run-rate, and FX effects. After-tax mode aligns with the take-home target.
+    """
+    data = normalize_daily_log_v2(df_v2)
+    capacity_column = (
+        "after_tax_div_forecast_jpy"
+        if after_tax else "annual_div_forecast_jpy"
+    )
+    empty_summary = {
+        "available_dates": [], "actual_start": None, "actual_end": None,
+        "total_start": 0.0, "total_end": 0.0, "total_change": 0.0,
+        "quantity_effect": 0.0, "dividend_effect": 0.0, "fx_effect": 0.0,
+        "after_tax": bool(after_tax),
+    }
+    if data.empty:
+        return pd.DataFrame(), empty_summary
+
+    completeness = (
+        data.groupby("date")[capacity_column]
+        .apply(lambda series: series.notna().all())
+    )
+    dates = sorted(completeness[completeness].index.tolist())
+    if start_date is not None:
+        start_date = pd.Timestamp(start_date).date()
+        dates = [d for d in dates if d >= start_date]
+    if end_date is not None:
+        end_date = pd.Timestamp(end_date).date()
+        dates = [d for d in dates if d <= end_date]
+    empty_summary["available_dates"] = dates
+    if len(dates) < 2:
+        return pd.DataFrame(), empty_summary
+
+    actual_start = dates[0]
+    actual_end = dates[-1]
+    before = data[data["date"].eq(actual_start)].copy()
+    after = data[data["date"].eq(actual_end)].copy()
+
+    def snapshot(frame):
+        records = []
+        for _, row in frame.iterrows():
+            quantity = float(row.get("quantity", 0) or 0)
+            fx = float(row.get("fx_to_jpy", 1) or 1)
+            unit = float(row.get("price_unit", 1) or 1)
+            capacity = pd.to_numeric(
+                pd.Series([row.get(capacity_column)]), errors="coerce"
+            ).iloc[0]
+            if pd.isna(capacity):
+                continue
+            if quantity > 0 and fx > 0:
+                effective_per_unit = float(capacity) * unit / quantity / fx
+            else:
+                effective_per_unit = 0.0
+            records.append({
+                **{column: row.get(column, "") for column in ATTRIBUTION_ID_COLUMNS},
+                "quantity": quantity, "fx_to_jpy": fx, "price_unit": unit,
+                "capacity_jpy": float(capacity),
+                "dividend_per_unit_effective": effective_per_unit,
+            })
+        if not records:
+            return pd.DataFrame()
+        frame_out = pd.DataFrame(records)
+        return (
+            frame_out.groupby(ATTRIBUTION_ID_COLUMNS, dropna=False, as_index=False)
+            .agg(
+                quantity=("quantity", "sum"),
+                fx_to_jpy=("fx_to_jpy", "first"),
+                price_unit=("price_unit", "first"),
+                capacity_jpy=("capacity_jpy", "sum"),
+                dividend_per_unit_effective=("dividend_per_unit_effective", "first"),
+            )
+        )
+
+    start_snapshot = snapshot(before)
+    end_snapshot = snapshot(after)
+    start_map = {}
+    end_map = {}
+
+    def key_for(row):
+        return tuple(row[column] for column in ATTRIBUTION_ID_COLUMNS)
+
+    for _, row in start_snapshot.iterrows():
+        start_map[key_for(row)] = row
+    for _, row in end_snapshot.iterrows():
+        end_map[key_for(row)] = row
+
+    records = []
+    all_keys = sorted(set(start_map) | set(end_map), key=lambda value: tuple(map(str, value)))
+    for key in all_keys:
+        row0 = start_map.get(key)
+        row1 = end_map.get(key)
+        meta = row1 if row1 is not None else row0
+        unit = float(meta["price_unit"] or 1.0)
+        if row0 is None:
+            start_capacity = 0.0
+            end_capacity = float(row1["capacity_jpy"])
+            effects = {"quantity": end_capacity, "dividend": 0.0, "fx": 0.0}
+        elif row1 is None:
+            start_capacity = float(row0["capacity_jpy"])
+            end_capacity = 0.0
+            effects = {"quantity": -start_capacity, "dividend": 0.0, "fx": 0.0}
+        else:
+            start_capacity = float(row0["capacity_jpy"])
+            end_capacity = float(row1["capacity_jpy"])
+            effects = _shapley_dividend_capacity_effects(
+                row0["quantity"], row0["dividend_per_unit_effective"], row0["fx_to_jpy"],
+                row1["quantity"], row1["dividend_per_unit_effective"], row1["fx_to_jpy"],
+                unit,
+            )
+            rounding_residual = end_capacity - start_capacity - sum(effects.values())
+            effects["dividend"] += rounding_residual
+        records.append({
+            "start_date": actual_start, "end_date": actual_end,
+            **{column: meta[column] for column in ATTRIBUTION_ID_COLUMNS},
+            "capacity_start": start_capacity, "capacity_end": end_capacity,
+            "total_change": end_capacity - start_capacity,
+            "quantity_effect": effects["quantity"],
+            "dividend_effect": effects["dividend"],
+            "fx_effect": effects["fx"],
+        })
+
+    detail = pd.DataFrame(records)
+    summary = {
+        "available_dates": dates, "actual_start": actual_start, "actual_end": actual_end,
+        "total_start": float(detail["capacity_start"].sum()),
+        "total_end": float(detail["capacity_end"].sum()),
+        "total_change": float(detail["total_change"].sum()),
+        "quantity_effect": float(detail["quantity_effect"].sum()),
+        "dividend_effect": float(detail["dividend_effect"].sum()),
+        "fx_effect": float(detail["fx_effect"].sum()),
+        "after_tax": bool(after_tax),
+    }
+    return detail, summary
 
 def build_income_event_data(df_v2):
     """Fetch actual dividend/distribution events for securities in V2.
