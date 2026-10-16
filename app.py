@@ -959,83 +959,143 @@ st.header("🔎 資産増減の要因分析")
 
 df_log_v2 = load_daily_log_v2()
 
-if df_log_v2.empty:
-    st.info("Daily_Log_V2 の記録がまだありません。")
+historical_detail = pd.DataFrame()
+historical_info = {"valid_dates": [], "warnings": [], "reference_warnings": []}
+if "df_log" in locals() and not df_log.empty:
+    try:
+        historical_detail, historical_info = load_reconstructed_history(df_log)
+    except Exception as error:
+        historical_info["warnings"] = [
+            f"旧Daily_Log再構成に失敗: {type(error).__name__}"
+        ]
+
+v2_dates = sorted(
+    pd.to_datetime(df_log_v2["date"], errors="coerce").dropna().dt.date.unique()
+) if not df_log_v2.empty else []
+historical_dates = historical_info.get("valid_dates", [])
+analysis_dates = sorted(set(historical_dates) | set(v2_dates))
+
+if len(analysis_dates) < 2:
+    st.info("要因分析には2日分以上の利用可能な履歴が必要です。")
 else:
-    v2_dates = sorted(
-        pd.to_datetime(df_log_v2["date"], errors="coerce").dropna().dt.date.unique()
-    )
-
-    if len(v2_dates) < 2:
-        st.info(
-            "要因分析は2日分のDaily_Log_V2が貯まると開始します。"
-            f" 現在の記録開始日は {v2_dates[0]} です。"
-        )
+    if historical_dates:
         st.caption(
-            "従来の資産推移・任意2日比較はDaily_Logを使うため、この待機期間でも今まで通り利用できます。"
+            f"2026/04/12〜{historical_dates[-1]} は旧Daily_Logの評価額＋過去価格・為替から再構成、"
+            "2026/10/15以降はDaily_Log_V2の実測詳細データを使用します。"
         )
+        reconstruction_warnings = (
+            historical_info.get("reference_warnings", [])
+            + historical_info.get("warnings", [])
+        )
+        if reconstruction_warnings:
+            with st.expander("過去履歴再構成の注意", expanded=False):
+                for warning in reconstruction_warnings[:30]:
+                    st.write("・" + str(warning))
+
+    preset = st.radio(
+        "分析期間",
+        ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL", "任意"],
+        horizontal=True,
+        key="attribution_period",
+    )
+    latest_date = analysis_dates[-1]
+
+    if preset == "1D":
+        selected_start = analysis_dates[-2]
+        selected_end = latest_date
+    elif preset == "1W":
+        selected_start = (pd.Timestamp(latest_date) - pd.Timedelta(days=7)).date()
+        selected_end = latest_date
+    elif preset == "1M":
+        selected_start = (pd.Timestamp(latest_date) - pd.DateOffset(months=1)).date()
+        selected_end = latest_date
+    elif preset == "3M":
+        selected_start = (pd.Timestamp(latest_date) - pd.DateOffset(months=3)).date()
+        selected_end = latest_date
+    elif preset == "YTD":
+        selected_start = latest_date.replace(month=1, day=1)
+        selected_end = latest_date
+    elif preset == "1Y":
+        selected_start = (pd.Timestamp(latest_date) - pd.DateOffset(years=1)).date()
+        selected_end = latest_date
+    elif preset == "ALL":
+        selected_start = analysis_dates[0]
+        selected_end = latest_date
     else:
-        preset = st.radio(
-            "分析期間",
-            ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL", "任意"],
-            horizontal=True,
-            key="attribution_period",
-        )
-        latest_date = v2_dates[-1]
+        col_start, col_end = st.columns(2)
+        with col_start:
+            selected_start = st.selectbox(
+                "比較開始日",
+                analysis_dates[:-1],
+                index=max(0, len(analysis_dates) - 2),
+                key="attribution_custom_start",
+            )
+        with col_end:
+            end_candidates = [d for d in analysis_dates if d > selected_start]
+            selected_end = st.selectbox(
+                "比較終了日",
+                end_candidates,
+                index=len(end_candidates) - 1,
+                key="attribution_custom_end",
+            )
 
-        if preset == "1D":
-            selected_start = v2_dates[-2]
-            selected_end = latest_date
-        elif preset == "1W":
-            selected_start = (pd.Timestamp(latest_date) - pd.Timedelta(days=7)).date()
-            selected_end = latest_date
-        elif preset == "1M":
-            selected_start = (pd.Timestamp(latest_date) - pd.DateOffset(months=1)).date()
-            selected_end = latest_date
-        elif preset == "3M":
-            selected_start = (pd.Timestamp(latest_date) - pd.DateOffset(months=3)).date()
-            selected_end = latest_date
-        elif preset == "YTD":
-            selected_start = latest_date.replace(month=1, day=1)
-            selected_end = latest_date
-        elif preset == "1Y":
-            selected_start = (pd.Timestamp(latest_date) - pd.DateOffset(years=1)).date()
-            selected_end = latest_date
-        elif preset == "ALL":
-            selected_start = v2_dates[0]
-            selected_end = latest_date
-        else:
-            col_start, col_end = st.columns(2)
-            with col_start:
-                selected_start = st.selectbox(
-                    "V2開始日",
-                    v2_dates[:-1],
-                    index=max(0, len(v2_dates) - 2),
-                    key="attribution_custom_start",
-                )
-            with col_end:
-                end_candidates = [d for d in v2_dates if d > selected_start]
-                selected_end = st.selectbox(
-                    "V2終了日",
-                    end_candidates,
-                    index=len(end_candidates) - 1,
-                    key="attribution_custom_end",
-                )
+    parts = []
 
+    if not historical_detail.empty:
+        historical_selected = historical_detail[
+            pd.to_datetime(historical_detail["start_date"]).dt.date.ge(selected_start)
+            & pd.to_datetime(historical_detail["end_date"]).dt.date.le(selected_end)
+        ].copy()
+        if not historical_selected.empty:
+            parts.append(historical_selected)
+
+    v2_detail = pd.DataFrame()
+    if len(v2_dates) >= 2 and selected_end >= v2_dates[0]:
         fund_reference, reference_warnings = load_fund_reference_data(df_log_v2)
-        for reference_warning in reference_warnings:
-            st.warning("投信要因分解: " + reference_warning)
+        if reference_warnings:
+            with st.expander("投信要因分解の注意", expanded=False):
+                for reference_warning in reference_warnings:
+                    st.write("・" + reference_warning)
 
-        detail_attr, daily_attr, attr = functions.analyze_attribution_period(
+        v2_detail, _, _ = functions.analyze_attribution_period(
             df_log_v2, selected_start, selected_end, fund_reference
         )
+        if not v2_detail.empty:
+            parts.append(v2_detail)
 
+    has_history_bridge = False
+    if (
+        historical_dates
+        and v2_dates
+        and selected_start <= historical_dates[-1]
+        and selected_end >= v2_dates[0]
+    ):
+        gap_detail = functions.build_history_gap_row(
+            df_log, df_log_v2, historical_dates[-1], v2_dates[0]
+        )
+        if not gap_detail.empty:
+            parts.append(gap_detail)
+            has_history_bridge = True
+
+    detail_attr = (
+        pd.concat(parts, ignore_index=True, sort=False)
+        if parts else pd.DataFrame()
+    )
+
+    income_events = pd.DataFrame()
+    income_warnings = []
+    if not df_log_v2.empty:
         income_events, income_warnings = load_income_event_data(df_log_v2)
-        if income_warnings:
-            with st.expander("配当・分配金データ取得の注意", expanded=False):
-                for income_warning in income_warnings:
-                    st.write("・" + income_warning)
+    if income_warnings:
+        with st.expander("配当・分配金データ取得の注意", expanded=False):
+            for income_warning in income_warnings:
+                st.write("・" + income_warning)
+
+    if not detail_attr.empty:
         detail_attr = functions.attach_income_effects(detail_attr, income_events)
+        daily_attr, attr = functions.summarize_attribution_detail(detail_attr)
+    else:
+        daily_attr, attr = functions.summarize_attribution_detail(detail_attr)
 
         if detail_attr.empty:
             st.info("選択期間内に連続する2日分以上のV2データがありません。")
