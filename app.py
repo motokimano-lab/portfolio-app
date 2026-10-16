@@ -142,6 +142,10 @@ def load_daily_log_v2():
     sheet = spreadsheet.worksheet("Daily_Log_V2")
     return pd.DataFrame(sheet.get_all_records())
 
+@st.cache_data(ttl=3600)
+def load_fund_reference_data(df_v2):
+    return functions.build_fund_reference_data(df_v2)
+
 # 為替取得
 usd_jpy, usd_error = get_fx("JPY=X", 150)
 vnd_jpy, vnd_error = get_fx("VNDJPY=X", 0.006)
@@ -236,7 +240,7 @@ if st.query_params.get("auto_save") == "1":
     # --- 保存 ---
     creds_dict = dict(st.secrets["gcp_service_account"])
     result = save_daily_log_detail(df, creds_dict)
-    detail_result = functions.save_daily_log_v2(df, creds_dict)
+    detail_result = functions.save_daily_log_v2(df, creds_dict, fund_status)
 
     st.write("AUTO SAVE DONE:", result, detail_result)
     print("AUTO SAVE DONE:", result)
@@ -409,6 +413,7 @@ if st.sidebar.button("最新データを再取得"):
     
     load_daily_log_detail.clear()
     load_daily_log_v2.clear()
+    load_fund_reference_data.clear()
 
     st.sidebar.success("最新データを再取得します")
 
@@ -1004,8 +1009,12 @@ else:
                     key="attribution_custom_end",
                 )
 
+        fund_reference, reference_warnings = load_fund_reference_data(df_log_v2)
+        for reference_warning in reference_warnings:
+            st.warning("投信要因分解: " + reference_warning)
+
         detail_attr, daily_attr, attr = functions.analyze_attribution_period(
-            df_log_v2, selected_start, selected_end
+            df_log_v2, selected_start, selected_end, fund_reference
         )
 
         if detail_attr.empty:
@@ -1018,21 +1027,31 @@ else:
                 " 日次スナップショットを積み上げて計算しています。"
             )
 
-            col_total, col_flow, col_market, col_fx = st.columns(4)
+            col_total, col_flow, col_market, col_fx, col_residual = st.columns(5)
             col_total.metric("総資産増減", f"{attr['total_change']:+,.0f} 円")
-            col_flow.metric("数量・資金/売買要因", f"{attr['flow_effect']:+,.0f} 円")
-            col_market.metric("市場・NAV要因", f"{attr['market_effect']:+,.0f} 円")
+            col_flow.metric("数量・資金/売買", f"{attr['flow_effect']:+,.0f} 円")
+            col_market.metric("市場要因", f"{attr['market_effect']:+,.0f} 円")
             col_fx.metric("為替要因", f"{attr['fx_effect']:+,.0f} 円")
+            col_residual.metric("投信乖離/その他", f"{attr['residual_effect']:+,.0f} 円")
 
-            st.caption(
-                "3要因は交差項を公平に配分するShapley分解で、合計が総資産増減と一致します。"
-                " JPY建て投資信託の為替影響は基準価額（NAV）の中に含まれるため、"
-                "現時点では「市場・NAV要因」に含まれます。"
-            )
+            if attr.get("fund_fx_estimated"):
+                st.caption(
+                    "円建て米国株投信は、S&P500系=VOO、楽天SCHD=SCHDを米国市場proxyとして、"
+                    "USDJPYと組み合わせて市場・為替を推定分離しています。"
+                    " 基準価額の評価時刻、信託報酬、配当・税、tracking差などは「投信乖離/その他」に残します。"
+                    " 4要因はShapley分解で交差項を公平に配分し、合計は総資産増減と一致します。"
+                )
+            else:
+                st.caption(
+                    "市場・為替・数量要因はShapley分解で、合計が総資産増減と一致します。"
+                    " 投信proxy参照がない期間は従来方式で計算します。"
+                )
 
             factor_df = pd.DataFrame({
-                "要因": ["数量・資金/売買", "市場・NAV", "為替"],
-                "寄与額": [attr["flow_effect"], attr["market_effect"], attr["fx_effect"]],
+                "要因": ["数量・資金/売買", "市場", "為替", "投信乖離/その他"],
+                "寄与額": [
+                    attr["flow_effect"], attr["market_effect"], attr["fx_effect"], attr["residual_effect"]
+                ],
             })
             fig_factor = px.bar(factor_df, x="要因", y="寄与額", title="期間中の要因別寄与額")
             fig_factor.update_layout(xaxis_title="", yaxis_title="円", margin=dict(t=45, l=10, r=10, b=10))
@@ -1041,11 +1060,12 @@ else:
             if len(daily_attr) > 1:
                 daily_plot = daily_attr.rename(columns={
                     "flow_effect": "数量・資金/売買",
-                    "market_effect": "市場・NAV",
+                    "market_effect": "市場",
                     "fx_effect": "為替",
+                    "residual_effect": "投信乖離/その他",
                 }).melt(
                     id_vars=["date"],
-                    value_vars=["数量・資金/売買", "市場・NAV", "為替"],
+                    value_vars=["数量・資金/売買", "市場", "為替", "投信乖離/その他"],
                     var_name="要因",
                     value_name="寄与額",
                 )
@@ -1062,13 +1082,14 @@ else:
                 view[label_column] = view[label_column].replace("", "未分類")
                 view = view.rename(columns={
                     label_column: label_name,
-                    "market_effect": "市場・NAV寄与",
+                    "market_effect": "市場寄与",
                     "fx_effect": "為替寄与",
-                    "market_fx_effect": "市場+為替寄与",
+                    "residual_effect": "投信乖離/その他",
+                    "investment_effect": "運用寄与",
                     "flow_effect": "数量・資金/売買",
                     "total_change": "総増減",
                 })
-                columns = [label_name, "市場・NAV寄与", "為替寄与", "市場+為替寄与", "数量・資金/売買", "総増減"]
+                columns = [label_name, "市場寄与", "為替寄与", "投信乖離/その他", "運用寄与", "数量・資金/売買", "総増減"]
                 if limit is not None:
                     view = view.head(limit)
                 return view[columns]
@@ -1076,8 +1097,9 @@ else:
             st.subheader("📦 アセットクラス別の寄与")
             st.dataframe(
                 _format_attr_table(asset_attr, "asset_class", "アセットクラス").style.format({
-                    "市場・NAV寄与": "{:+,.0f}", "為替寄与": "{:+,.0f}",
-                    "市場+為替寄与": "{:+,.0f}", "数量・資金/売買": "{:+,.0f}", "総増減": "{:+,.0f}",
+                    "市場寄与": "{:+,.0f}", "為替寄与": "{:+,.0f}",
+                    "投信乖離/その他": "{:+,.0f}", "運用寄与": "{:+,.0f}",
+                    "数量・資金/売買": "{:+,.0f}", "総増減": "{:+,.0f}",
                 }),
                 use_container_width=True,
                 hide_index=True,
@@ -1087,7 +1109,7 @@ else:
             with col_sector:
                 st.subheader("🏭 セクター寄与 TOP")
                 sector_display = sector_attr.reindex(
-                    sector_attr["market_fx_effect"].abs().sort_values(ascending=False).index
+                    sector_attr["investment_effect"].abs().sort_values(ascending=False).index
                 )
                 st.dataframe(
                     _format_attr_table(sector_display, "sector", "セクター", limit=10).style.format({
@@ -1101,7 +1123,7 @@ else:
             with col_name:
                 st.subheader("🏅 銘柄寄与 TOP")
                 name_display = name_attr.reindex(
-                    name_attr["market_fx_effect"].abs().sort_values(ascending=False).index
+                    name_attr["investment_effect"].abs().sort_values(ascending=False).index
                 )
                 st.dataframe(
                     _format_attr_table(name_display, "display_name", "銘柄", limit=10).style.format({
@@ -1174,7 +1196,7 @@ if st.button("📅 今日の資産を記録"):
 
         # 👇 引数に渡す
         result = save_daily_log_detail(df, creds_dict)
-        detail_result = functions.save_daily_log_v2(df, creds_dict)
+        detail_result = functions.save_daily_log_v2(df, creds_dict, fund_status)
     load_daily_log_detail.clear()
     load_daily_log_v2.clear()
 
