@@ -222,6 +222,63 @@ class TaxAndMigrationTests(unittest.TestCase):
         self.assertAlmostEqual(new.fx_effect,0)
         self.assertAlmostEqual(summary['total_change'],0,places=6)
 
+    def test_us_fund_attribution_separates_proxy_fx_and_residual(self):
+        columns=DAILY_LOG_V2_HEADERS
+        nav0=10000.0
+        nav1=nav0 * 1.02 * 1.01 * 0.999
+        rows=[
+            ['2026-10-15','x','元気','NISA','MF:03311187','SP500','米国株','',
+             'JPY','mutual_fund','03311187','eMAXIS Slim',10000,10000,nav0,1,
+             nav0,nav0,'成長','',0,'2026-10-14','VOO'],
+            ['2026-10-16','x','元気','NISA','MF:03311187','SP500','米国株','',
+             'JPY','mutual_fund','03311187','eMAXIS Slim',10000,10000,nav1,1,
+             nav1,nav1,'成長','',0,'2026-10-15','VOO'],
+        ]
+        references={
+            ('VOO','2026-10-14'):{'proxy_price':100.0,'usd_jpy':150.0},
+            ('VOO','2026-10-15'):{'proxy_price':102.0,'usd_jpy':151.5},
+        }
+        detail,_,summary=analyze_attribution_period(
+            pd.DataFrame(rows,columns=columns),
+            fund_reference=references,
+        )
+        item=detail.iloc[0]
+        self.assertTrue(item.fund_fx_estimated)
+        self.assertEqual(item.attribution_method,'fund_proxy_estimate')
+        self.assertGreater(item.market_effect,0)
+        self.assertGreater(item.fx_effect,0)
+        self.assertLess(item.residual_effect,0)
+        self.assertAlmostEqual(
+            item.flow_effect+item.market_effect+item.fx_effect+item.residual_effect,
+            item.total_change,
+            places=8,
+        )
+        self.assertAlmostEqual(
+            summary['flow_effect']+summary['market_effect']+
+            summary['fx_effect']+summary['residual_effect'],
+            summary['total_change'],
+            places=8,
+        )
+        self.assertTrue(summary['fund_fx_estimated'])
+
+    def test_us_fund_without_reference_falls_back_safely(self):
+        columns=DAILY_LOG_V2_HEADERS
+        rows=[
+            ['2026-10-15','x','元気','NISA','MF:03311187','SP500','米国株','',
+             'JPY','mutual_fund','03311187','eMAXIS Slim',10000,10000,10000,1,
+             10000,10000,'成長','',0,'',''],
+            ['2026-10-16','x','元気','NISA','MF:03311187','SP500','米国株','',
+             'JPY','mutual_fund','03311187','eMAXIS Slim',10000,10000,10100,1,
+             10100,10100,'成長','',0,'',''],
+        ]
+        detail,_,summary=analyze_attribution_period(pd.DataFrame(rows,columns=columns))
+        item=detail.iloc[0]
+        self.assertFalse(item.fund_fx_estimated)
+        self.assertAlmostEqual(item.fx_effect,0)
+        self.assertAlmostEqual(item.residual_effect,0)
+        self.assertAlmostEqual(item.market_effect,item.total_change)
+        self.assertFalse(summary['fund_fx_estimated'])
+
     def test_period_attribution_sums_daily_and_groups_sector(self):
         columns=DAILY_LOG_V2_HEADERS
         def row(day,ticker,name,sector,q,p,fx,value):
