@@ -42,6 +42,8 @@ FUND_SPECS = {
         "provider_code": "100105",
         "foreign_tax_adjustment": True,
         "underlying_foreign_tax_rate": FOREIGN_WITHHOLDING_RATE,
+        "underlying_currency": "USD",
+        "attribution_proxy": "SCHD",
     },
     "03311187": {
         "product_name": "eMAXIS Slim 米国株式（S&P500）",
@@ -50,6 +52,8 @@ FUND_SPECS = {
         "provider": "mufg",
         "latest": "https://developer.am.mufg.jp/fund_information_latest/association_fund_cd/03311187",
         "history": "https://www.am.mufg.jp/fund_file/setteirai/253266.csv",
+        "underlying_currency": "USD",
+        "attribution_proxy": "VOO",
     },
     "89311199": {
         "product_name": "SBI・V・S&P500インデックス・ファンド",
@@ -58,6 +62,8 @@ FUND_SPECS = {
         "provider": "sbi",
         "history": "https://apl.wealthadvisor.jp/webasp/sbi_am/pc/download.aspx?type=1&fnc=2019092601",
         "distributions": "https://apl.wealthadvisor.jp/xml/chart/funddata/2019092601.xml",
+        "underlying_currency": "USD",
+        "attribution_proxy": "VOO",
     },
 }
 

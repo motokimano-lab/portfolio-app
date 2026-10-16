@@ -103,7 +103,7 @@ result = save_daily_log_detail(df, creds_dict)
 print(result)
 
 try:
-    detail_result = save_daily_log_v2(df, creds_dict)
+    detail_result = save_daily_log_v2(df, creds_dict, fund_status)
     print(detail_result)
 except Exception as error:
     notify_discord(

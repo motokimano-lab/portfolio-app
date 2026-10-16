@@ -463,11 +463,15 @@ def build_current_market_movers(df, top_n=10):
     return gainers, losers
 
 
+ATTRIBUTION_SCHEMA_VERSION = 2
+
+
 DAILY_LOG_V2_HEADERS = [
     "date", "snapshot_at", "owner", "account_type", "ticker", "display_name",
     "asset_class", "sector", "currency", "instrument_type", "fund_code",
     "product_name", "price_unit", "quantity", "price", "fx_to_jpy",
-    "value_jpy", "cost_basis_jpy", "purpose", "role", "day_diff_pct"
+    "value_jpy", "cost_basis_jpy", "purpose", "role", "day_diff_pct",
+    "fund_base_date", "proxy_ticker"
 ]
 
 
@@ -551,7 +555,7 @@ def save_daily_log_detail(df, creds_dict):
     return f"{len(rows)} rows saved; replaced {replaced} rows for {today}"
 
 
-def save_daily_log_v2(df, creds_dict):
+def save_daily_log_v2(df, creds_dict, fund_status=None):
     """Save a detailed daily snapshot for future attribution analysis.
 
     The legacy Daily_Log remains the canonical source for the existing
@@ -565,8 +569,18 @@ def save_daily_log_v2(df, creds_dict):
     today = now.strftime("%Y-%m-%d")
     snapshot_at = now.isoformat()
 
+    from mutual_funds import FUND_SPECS
+
+    status_by_code = {}
+    for ticker, record in (fund_status or {}).items():
+        code = str(ticker).replace("MF:", "")
+        status_by_code[code] = record
+
     rows = []
     for _, r in df.iterrows():
+        fund_code = _as_text(r, "fund_code")
+        fund_record = status_by_code.get(fund_code, {})
+        spec = FUND_SPECS.get(fund_code, {})
         rows.append([
             today,
             snapshot_at,
@@ -578,7 +592,7 @@ def save_daily_log_v2(df, creds_dict):
             _as_text(r, "sector"),
             _as_text(r, "currency"),
             _as_text(r, "instrument_type"),
-            _as_text(r, "fund_code"),
+            fund_code,
             _as_text(r, "product_name"),
             _as_float(r, "price_unit", 1.0),
             _as_float(r, "quantity"),
@@ -589,6 +603,8 @@ def save_daily_log_v2(df, creds_dict):
             _as_text(r, "purpose"),
             _as_text(r, "role"),
             _as_float(r, "day_diff_pct"),
+            str(fund_record.get("base_date") or ""),
+            str(spec.get("attribution_proxy") or ""),
         ])
 
     replaced = _replace_today_rows_safely(sheet, today, rows)
@@ -608,7 +624,13 @@ def normalize_daily_log_v2(df):
     if data.empty:
         return data
 
-    required = set(DAILY_LOG_V2_HEADERS)
+    # These columns were added after V2 started. Treat them as optional for
+    # backwards compatibility with the first snapshots.
+    for column in ["fund_base_date", "proxy_ticker"]:
+        if column not in data.columns:
+            data[column] = ""
+
+    required = set(DAILY_LOG_V2_HEADERS) - {"fund_base_date", "proxy_ticker"}
     missing = sorted(required - set(data.columns))
     if missing:
         raise ValueError("Daily_Log_V2 required columns missing: " + ", ".join(missing))
@@ -619,6 +641,7 @@ def normalize_daily_log_v2(df):
     text_columns = [
         "owner", "account_type", "ticker", "display_name", "asset_class", "sector",
         "currency", "instrument_type", "fund_code", "product_name", "purpose", "role",
+        "fund_base_date", "proxy_ticker",
     ]
     for column in text_columns:
         data[column] = data[column].fillna("").astype(str).str.strip()
@@ -653,6 +676,8 @@ def _snapshot_positions(df_day):
             fx_to_jpy=("fx_to_jpy", "first"),
             value_jpy=("value_jpy", "sum"),
             cost_basis_jpy=("cost_basis_jpy", "sum"),
+            fund_base_date=("fund_base_date", "first"),
+            proxy_ticker=("proxy_ticker", "first"),
         )
     )
     return aggregated
@@ -664,11 +689,7 @@ def _position_value(quantity, price, fx_to_jpy, price_unit):
 
 
 def _shapley_position_effects(q0, p0, f0, q1, p1, f1, price_unit):
-    """Exact symmetric 3-factor decomposition for quantity, local price and FX.
-
-    Interaction terms are shared fairly across the three factors, so the
-    effects always add exactly to the JPY valuation change.
-    """
+    """Exact symmetric 3-factor decomposition for quantity, local price and FX."""
     from itertools import permutations
 
     old = {"quantity": float(q0), "market": float(p0), "fx": float(f0)}
@@ -692,7 +713,156 @@ def _shapley_position_effects(q0, p0, f0, q1, p1, f1, price_unit):
     return {key: value / divisor for key, value in effects.items()}
 
 
-def attribution_between_snapshots(start_df, end_df, start_date, end_date):
+def _shapley_fund_effects(q0, q1, nav0, market_ratio, fx_ratio, residual_ratio, price_unit):
+    """Exact 4-factor decomposition for a JPY-priced unhedged US equity fund.
+
+    The observed NAV ratio is represented as:
+      proxy US-market ratio × USDJPY ratio × residual ratio.
+    Shapley allocation splits interaction terms symmetrically so quantity,
+    market, FX, and residual effects add exactly to the JPY valuation change.
+    """
+    from itertools import permutations
+
+    old = {"quantity": float(q0), "market": 1.0, "fx": 1.0, "residual": 1.0}
+    new = {
+        "quantity": float(q1),
+        "market": float(market_ratio),
+        "fx": float(fx_ratio),
+        "residual": float(residual_ratio),
+    }
+    effects = {key: 0.0 for key in old}
+    unit = float(price_unit) if price_unit else 1.0
+
+    def value(state):
+        return (
+            state["quantity"] / unit
+            * float(nav0)
+            * state["market"]
+            * state["fx"]
+            * state["residual"]
+        )
+
+    factors = ("quantity", "market", "fx", "residual")
+    orders = list(permutations(factors))
+    for order in orders:
+        state = old.copy()
+        before = value(state)
+        for factor in order:
+            state[factor] = new[factor]
+            after = value(state)
+            effects[factor] += after - before
+            before = after
+
+    divisor = float(len(orders))
+    return {key: value_ / divisor for key, value_ in effects.items()}
+
+
+def _history_close_series(symbol, start_date, end_date):
+    """Download a simple adjusted-close series for attribution references."""
+    history = yf.Ticker(symbol).history(
+        start=pd.Timestamp(start_date).date(),
+        end=pd.Timestamp(end_date).date(),
+        auto_adjust=True,
+        actions=False,
+    )
+    if history.empty or "Close" not in history.columns:
+        raise ValueError(f"reference history unavailable: {symbol}")
+    close = pd.to_numeric(history["Close"], errors="coerce").dropna()
+    if close.empty:
+        raise ValueError(f"reference close unavailable: {symbol}")
+    close.index = pd.to_datetime(close.index)
+    return close
+
+
+def build_fund_reference_data(df_v2):
+    """Build proxy-price and USDJPY references aligned to Japanese fund NAV dates.
+
+    For a Japanese NAV dated D, the US-equity proxy uses the latest US close
+    strictly before D. USDJPY uses the latest daily close on or before D.
+    This is an estimate because Japanese funds use their own valuation timing
+    and reference FX rates; any mismatch is kept as a separate residual effect.
+    """
+    data = normalize_daily_log_v2(df_v2)
+    if data.empty:
+        return {}, []
+
+    funds = data[
+        data["instrument_type"].eq("mutual_fund")
+        & data["fund_base_date"].ne("")
+        & data["proxy_ticker"].ne("")
+    ].copy()
+    if funds.empty:
+        return {}, ["投資信託の基準日/ベンチマーク情報が未記録です"]
+
+    funds["fund_base_date_parsed"] = pd.to_datetime(
+        funds["fund_base_date"], errors="coerce"
+    ).dt.date
+    funds = funds[funds["fund_base_date_parsed"].notna()].copy()
+    if funds.empty:
+        return {}, ["投資信託の基準日を解釈できません"]
+
+    dates = sorted(funds["fund_base_date_parsed"].unique())
+    start = pd.Timestamp(dates[0]) - pd.Timedelta(days=10)
+    end = pd.Timestamp(dates[-1]) + pd.Timedelta(days=2)
+
+    references = {}
+    warnings = []
+
+    try:
+        fx_history = _history_close_series("JPY=X", start, end)
+    except Exception as error:
+        fx_history = pd.Series(dtype=float)
+        warnings.append(f"USDJPY参照取得失敗: {type(error).__name__}")
+
+    proxy_histories = {}
+    for proxy in sorted(funds["proxy_ticker"].unique()):
+        try:
+            proxy_histories[proxy] = _history_close_series(proxy, start, end)
+        except Exception as error:
+            warnings.append(f"{proxy}参照取得失敗: {type(error).__name__}")
+
+    for _, row in (
+        funds[["proxy_ticker", "fund_base_date_parsed"]]
+        .drop_duplicates()
+        .iterrows()
+    ):
+        proxy = row["proxy_ticker"]
+        base_date = row["fund_base_date_parsed"]
+        proxy_history = proxy_histories.get(proxy)
+        if proxy_history is None or proxy_history.empty or fx_history.empty:
+            continue
+
+        proxy_candidates = proxy_history[
+            proxy_history.index.date < base_date
+        ]
+        fx_candidates = fx_history[
+            fx_history.index.date <= base_date
+        ]
+        if proxy_candidates.empty or fx_candidates.empty:
+            warnings.append(f"{proxy} {base_date}: 対応する市場/為替参照値なし")
+            continue
+
+        references[(proxy, base_date.isoformat())] = {
+            "proxy_price": float(proxy_candidates.iloc[-1]),
+            "proxy_market_date": proxy_candidates.index[-1].date().isoformat(),
+            "usd_jpy": float(fx_candidates.iloc[-1]),
+            "fx_date": fx_candidates.index[-1].date().isoformat(),
+        }
+
+    return references, list(dict.fromkeys(warnings))
+
+
+def _fund_reference_for(row, fund_reference):
+    proxy = str(row.get("proxy_ticker", "") or "").strip()
+    base_date = str(row.get("fund_base_date", "") or "").strip()
+    if not proxy or not base_date:
+        return None
+    return (fund_reference or {}).get((proxy, base_date))
+
+
+def attribution_between_snapshots(
+    start_df, end_df, start_date, end_date, fund_reference=None
+):
     """Return exact per-position JPY attribution between two snapshots."""
     start = _snapshot_positions(start_df)
     end = _snapshot_positions(end_df)
@@ -747,12 +917,44 @@ def attribution_between_snapshots(start_df, end_df, start_date, end_date):
             f1 = float(after["fx_to_jpy"])
             v1 = float(after["value_jpy"])
 
-        effects = _shapley_position_effects(q0, p0, f0, q1, p1, f1, unit)
         total_change = v1 - v0
-        residual = total_change - sum(effects.values())
-        # Floating-point rounding only; assign residual to market so row totals
-        # remain exact at currency precision.
-        effects["market"] += residual
+        residual_effect = 0.0
+        fund_fx_estimated = False
+        attribution_method = "direct"
+
+        is_fund = str(meta_source.get("instrument_type", "")).strip() == "mutual_fund"
+        before_ref = _fund_reference_for(before, fund_reference) if before is not None else None
+        after_ref = _fund_reference_for(after, fund_reference) if after is not None else None
+
+        if (
+            is_fund
+            and before is not None
+            and after is not None
+            and before_ref
+            and after_ref
+            and p0 > 0
+            and before_ref["proxy_price"] > 0
+            and before_ref["usd_jpy"] > 0
+        ):
+            market_ratio = after_ref["proxy_price"] / before_ref["proxy_price"]
+            fx_ratio = after_ref["usd_jpy"] / before_ref["usd_jpy"]
+            nav_ratio = p1 / p0
+            residual_ratio = nav_ratio / (market_ratio * fx_ratio)
+
+            effects = _shapley_fund_effects(
+                q0, q1, p0, market_ratio, fx_ratio, residual_ratio, unit
+            )
+            residual = total_change - sum(effects.values())
+            effects["residual"] += residual
+            residual_effect = effects["residual"]
+            fund_fx_estimated = True
+            attribution_method = "fund_proxy_estimate"
+        else:
+            effects = _shapley_position_effects(
+                q0, p0, f0, q1, p1, f1, unit
+            )
+            residual = total_change - sum(effects.values())
+            effects["market"] += residual
 
         record = {
             "start_date": start_date,
@@ -764,20 +966,23 @@ def attribution_between_snapshots(start_df, end_df, start_date, end_date):
             "flow_effect": effects["quantity"],
             "market_effect": effects["market"],
             "fx_effect": effects["fx"],
+            "residual_effect": residual_effect,
+            "fund_fx_estimated": fund_fx_estimated,
+            "attribution_method": attribution_method,
         }
         record["market_fx_effect"] = record["market_effect"] + record["fx_effect"]
+        record["investment_effect"] = (
+            record["market_effect"] + record["fx_effect"] + record["residual_effect"]
+        )
         records.append(record)
 
     return pd.DataFrame(records)
 
 
-def analyze_attribution_period(df_v2, start_date=None, end_date=None):
-    """Aggregate daily Shapley attribution over consecutive V2 snapshots.
-
-    The result is suitable for 1D/1W/1M/3M/YTD/1Y/ALL/custom views.  It sums
-    daily effects, so purchases and sales inside the period do not get mistaken
-    for investment performance.
-    """
+def analyze_attribution_period(
+    df_v2, start_date=None, end_date=None, fund_reference=None
+):
+    """Aggregate daily attribution over consecutive V2 snapshots."""
     data = normalize_daily_log_v2(df_v2)
     empty_summary = {
         "available_dates": [],
@@ -787,6 +992,8 @@ def analyze_attribution_period(df_v2, start_date=None, end_date=None):
         "flow_effect": 0.0,
         "market_effect": 0.0,
         "fx_effect": 0.0,
+        "residual_effect": 0.0,
+        "fund_fx_estimated": False,
     }
     if data.empty:
         return pd.DataFrame(), pd.DataFrame(), empty_summary
@@ -809,14 +1016,14 @@ def analyze_attribution_period(df_v2, start_date=None, end_date=None):
         after = data[data["date"].eq(current_date)]
         pieces.append(
             attribution_between_snapshots(
-                before, after, previous_date, current_date
+                before, after, previous_date, current_date, fund_reference
             )
         )
 
     detail = pd.concat(pieces, ignore_index=True) if pieces else pd.DataFrame()
     daily = (
         detail.groupby("end_date", as_index=False)[
-            ["total_change", "flow_effect", "market_effect", "fx_effect"]
+            ["total_change", "flow_effect", "market_effect", "fx_effect", "residual_effect"]
         ]
         .sum()
         .rename(columns={"end_date": "date"})
@@ -830,6 +1037,8 @@ def analyze_attribution_period(df_v2, start_date=None, end_date=None):
         "flow_effect": float(detail["flow_effect"].sum()),
         "market_effect": float(detail["market_effect"].sum()),
         "fx_effect": float(detail["fx_effect"].sum()),
+        "residual_effect": float(detail["residual_effect"].sum()),
+        "fund_fx_estimated": bool(detail["fund_fx_estimated"].any()),
     }
     return detail, daily, summary
 
@@ -843,11 +1052,12 @@ def summarize_attribution(detail, group_by):
     result = (
         detail.groupby(columns, dropna=False, as_index=False)[
             ["value_start", "value_end", "total_change", "flow_effect",
-             "market_effect", "fx_effect", "market_fx_effect"]
+             "market_effect", "fx_effect", "residual_effect",
+             "market_fx_effect", "investment_effect"]
         ]
         .sum()
     )
-    return result.sort_values("market_fx_effect", ascending=False).reset_index(drop=True)
+    return result.sort_values("investment_effect", ascending=False).reset_index(drop=True)
 
 
 def daily_log_migration_names(df_log, start_date, end_date):
