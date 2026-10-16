@@ -186,10 +186,10 @@ class TaxAndMigrationTests(unittest.TestCase):
     def test_attribution_exactly_splits_market_fx_and_flow(self):
         columns=DAILY_LOG_V2_HEADERS
         rows=[
-            ['2026-10-15','x','元気','特定','AAA','AAA','米国株','Tech','USD','','','',1,10,100,150,150000,100000,'成長','',0],
-            ['2026-10-15','x','元気','VCB','CASH','USD','現金・債券','CASH','USD','','','',1,1000,1,150,150000,150000,'現金','',0],
-            ['2026-10-16','x','元気','特定','AAA','AAA','米国株','Tech','USD','','','',1,12,110,155,204600,120000,'成長','',10],
-            ['2026-10-16','x','元気','VCB','CASH','USD','現金・債券','CASH','USD','','','',1,1200,1,155,186000,186000,'現金','',0],
+            ['2026-10-15','x','元気','特定','AAA','AAA','米国株','Tech','USD','','','',1,10,100,150,150000,100000,'成長','',0,'',''],
+            ['2026-10-15','x','元気','VCB','CASH','USD','現金・債券','CASH','USD','','','',1,1000,1,150,150000,150000,'現金','',0,'',''],
+            ['2026-10-16','x','元気','特定','AAA','AAA','米国株','Tech','USD','','','',1,12,110,155,204600,120000,'成長','',10,'',''],
+            ['2026-10-16','x','元気','VCB','CASH','USD','現金・債券','CASH','USD','','','',1,1200,1,155,186000,186000,'現金','',0,'',''],
         ]
         detail,daily,summary=analyze_attribution_period(pd.DataFrame(rows,columns=columns))
         self.assertAlmostEqual(summary['total_change'],90600)
@@ -211,9 +211,9 @@ class TaxAndMigrationTests(unittest.TestCase):
     def test_new_position_is_flow_not_fake_market_gain(self):
         columns=DAILY_LOG_V2_HEADERS
         rows=[
-            ['2026-10-15','x','元気','楽天銀行','CASH','JPY','現金・債券','CASH','JPY','','','',1,1000000,1,1,1000000,1000000,'現金','',0],
-            ['2026-10-16','x','元気','楽天銀行','CASH','JPY','現金・債券','CASH','JPY','','','',1,500000,1,1,500000,500000,'現金','',0],
-            ['2026-10-16','x','元気','特定','NEW','NEW','日本株','機械','JPY','','','',1,100,5000,1,500000,500000,'成長','',0],
+            ['2026-10-15','x','元気','楽天銀行','CASH','JPY','現金・債券','CASH','JPY','','','',1,1000000,1,1,1000000,1000000,'現金','',0,'',''],
+            ['2026-10-16','x','元気','楽天銀行','CASH','JPY','現金・債券','CASH','JPY','','','',1,500000,1,1,500000,500000,'現金','',0,'',''],
+            ['2026-10-16','x','元気','特定','NEW','NEW','日本株','機械','JPY','','','',1,100,5000,1,500000,500000,'成長','',0,'',''],
         ]
         detail,_,summary=analyze_attribution_period(pd.DataFrame(rows,columns=columns))
         new=detail.loc[detail.ticker.eq('NEW')].iloc[0]
@@ -282,7 +282,7 @@ class TaxAndMigrationTests(unittest.TestCase):
     def test_period_attribution_sums_daily_and_groups_sector(self):
         columns=DAILY_LOG_V2_HEADERS
         def row(day,ticker,name,sector,q,p,fx,value):
-            return [day,'x','元気','特定',ticker,name,'米国株',sector,'USD','','','',1,q,p,fx,value,0,'成長','',0]
+            return [day,'x','元気','特定',ticker,name,'米国株',sector,'USD','','','',1,q,p,fx,value,0,'成長','',0,'','']
         frame=pd.DataFrame([
             row('2026-10-15','AAA','AAA','Tech',10,100,150,150000),
             row('2026-10-15','BBB','BBB','Bank',10,100,150,150000),
