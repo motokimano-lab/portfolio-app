@@ -8,7 +8,8 @@ from dividend_tax import calc_after_tax_dividend, normalize_account_type
 from functions import (
     normalize_positions, compare_portfolio, compare_latest_logs,
     save_daily_log_detail, save_daily_log_v2, DAILY_LOG_V2_HEADERS,
-    analyze_attribution_period, summarize_attribution, calculate_estimated_twr
+    analyze_attribution_period, summarize_attribution, calculate_estimated_twr,
+    attach_income_effects, calculate_estimated_total_return_twr
 )
 
 
@@ -362,6 +363,79 @@ class TaxAndMigrationTests(unittest.TestCase):
         self.assertFalse(summary['valid'])
         self.assertEqual(summary['invalid_periods'], 1)
         self.assertTrue(pd.isna(daily.iloc[0].period_return))
+
+    def test_income_effect_uses_start_quantity_and_account_tax(self):
+        detail = pd.DataFrame([
+            dict(
+                start_date=date(2026,10,15), end_date=date(2026,10,16),
+                ticker='ABBV', account_type='特定', currency='USD',
+                instrument_type='', fund_code='', price_unit=1,
+                quantity_start=10, quantity_end=10,
+                fx_start=150, fx_end=152,
+                investment_effect=0.0,
+            ),
+            dict(
+                start_date=date(2026,10,15), end_date=date(2026,10,16),
+                ticker='1928.T', account_type='NISA', currency='JPY',
+                instrument_type='', fund_code='', price_unit=1,
+                quantity_start=100, quantity_end=100,
+                fx_start=1, fx_end=1,
+                investment_effect=0.0,
+            ),
+        ])
+        events = pd.DataFrame([
+            dict(ticker='ABBV', event_date=date(2026,10,15),
+                 amount_per_unit=1.0, currency='USD', price_unit=1, source='test'),
+            dict(ticker='1928.T', event_date=date(2026,10,15),
+                 amount_per_unit=10.0, currency='JPY', price_unit=1, source='test'),
+        ])
+        result = attach_income_effects(detail, events)
+        abbv = result.loc[result.ticker.eq('ABBV')].iloc[0]
+        sekisui = result.loc[result.ticker.eq('1928.T')].iloc[0]
+        self.assertAlmostEqual(abbv.income_effect_gross, 1510.0)
+        self.assertLess(abbv.income_effect_after_tax, abbv.income_effect_gross)
+        self.assertAlmostEqual(sekisui.income_effect_gross, 1000.0)
+        self.assertAlmostEqual(sekisui.income_effect_after_tax, 1000.0)
+
+    def test_mutual_fund_distribution_uses_ten_thousand_unit_basis(self):
+        detail = pd.DataFrame([
+            dict(
+                start_date=date(2026,10,15), end_date=date(2026,10,16),
+                ticker='MF:9I312249', account_type='NISA', currency='JPY',
+                instrument_type='mutual_fund', fund_code='9I312249',
+                price_unit=10000, quantity_start=20000, quantity_end=20000,
+                fx_start=1, fx_end=1, investment_effect=0.0,
+            ),
+        ])
+        events = pd.DataFrame([
+            dict(
+                ticker='MF:9I312249', event_date=date(2026,10,15),
+                amount_per_unit=95.0, currency='JPY', price_unit=10000,
+                source='test',
+            ),
+        ])
+        result = attach_income_effects(detail, events)
+        item = result.iloc[0]
+        self.assertAlmostEqual(item.income_effect_gross, 190.0)
+        self.assertAlmostEqual(item.income_effect_after_tax, 190.0)
+
+    def test_total_return_twr_adds_income_to_price_return(self):
+        detail = pd.DataFrame([
+            dict(
+                start_date=date(2026,10,15), end_date=date(2026,10,16),
+                value_start=100.0, value_end=98.0, total_change=-2.0,
+                flow_effect=0.0, investment_effect=-2.0,
+                income_effect_gross=2.0,
+            ),
+        ])
+        daily, summary = calculate_estimated_total_return_twr(
+            detail, 'income_effect_gross'
+        )
+        self.assertTrue(summary['valid'])
+        self.assertAlmostEqual(summary['income_effect'], 2.0)
+        self.assertAlmostEqual(summary['return_effect'], 0.0)
+        self.assertAlmostEqual(summary['twr'], 0.0)
+        self.assertAlmostEqual(daily.iloc[0].period_return, 0.0)
 
     def test_v2_snapshot_keeps_legacy_comparison_separate(self):
         from datetime import datetime

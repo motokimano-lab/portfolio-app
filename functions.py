@@ -6,7 +6,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from dividend_tax import normalize_account_type
+from dividend_tax import normalize_account_type, calc_after_tax_dividend
 
 # --- 為替 ---
 import time
@@ -463,7 +463,7 @@ def build_current_market_movers(df, top_n=10):
     return gainers, losers
 
 
-ATTRIBUTION_SCHEMA_VERSION = 3
+ATTRIBUTION_SCHEMA_VERSION = 4
 
 
 DAILY_LOG_V2_HEADERS = [
@@ -980,6 +980,12 @@ def attribution_between_snapshots(
             **{column: meta_source[column] for column in ATTRIBUTION_ID_COLUMNS},
             "value_start": v0,
             "value_end": v1,
+            "quantity_start": q0,
+            "quantity_end": q1,
+            "price_start": p0,
+            "price_end": p1,
+            "fx_start": f0,
+            "fx_end": f1,
             "total_change": total_change,
             "flow_effect": effects["quantity"],
             "market_effect": effects["market"],
@@ -1080,6 +1086,336 @@ def summarize_attribution(detail, group_by):
         .sum()
     )
     return result.sort_values("investment_effect", ascending=False).reset_index(drop=True)
+
+
+def build_income_event_data(df_v2):
+    """Fetch actual dividend/distribution events for securities in V2.
+
+    Stock/ETF events come from Yahoo Finance corporate actions. Japanese mutual
+    funds use their actual fund distribution histories; ETF proxy dividends are
+    never substituted for fund distributions.
+
+    Returned amounts are per share (stocks/ETFs) or per 10,000 units (funds),
+    in the security's payout currency. The result is an attribution aid, not a
+    brokerage cash-receipt ledger.
+    """
+    from mutual_funds import get_mutual_fund_distribution_history
+
+    data = normalize_daily_log_v2(df_v2)
+    columns = [
+        "ticker", "event_date", "amount_per_unit", "currency",
+        "price_unit", "source",
+    ]
+    if data.empty:
+        return pd.DataFrame(columns=columns), []
+
+    dates = sorted(data["date"].unique())
+    if len(dates) < 2:
+        return pd.DataFrame(columns=columns), []
+
+    start_date = dates[0]
+    end_date = dates[-1]
+    records = []
+    warnings = []
+
+    direct = data[
+        ~data["instrument_type"].eq("mutual_fund")
+        & ~data["ticker"].str.upper().eq("CASH")
+        & data["ticker"].ne("")
+    ].copy()
+    direct_tickers = sorted(direct["ticker"].unique().tolist())
+
+    if direct_tickers:
+        try:
+            downloaded = yf.download(
+                direct_tickers,
+                start=(pd.Timestamp(start_date) - pd.Timedelta(days=3)).date(),
+                end=(pd.Timestamp(end_date) + pd.Timedelta(days=2)).date(),
+                actions=True,
+                auto_adjust=False,
+                group_by="ticker",
+                progress=False,
+            )
+        except Exception as error:
+            downloaded = None
+            warnings.append(
+                f"株式配当履歴の一括取得失敗: {type(error).__name__}"
+            )
+
+        currency_by_ticker = (
+            direct.groupby("ticker")["currency"].first().to_dict()
+            if not direct.empty else {}
+        )
+
+        for ticker in direct_tickers:
+            try:
+                if downloaded is None:
+                    raise ValueError("bulk dividend data unavailable")
+
+                if isinstance(downloaded.columns, pd.MultiIndex):
+                    if ticker not in downloaded.columns.get_level_values(0):
+                        raise ValueError("ticker missing from bulk dividend data")
+                    history = downloaded[ticker].copy()
+                elif len(direct_tickers) == 1:
+                    history = downloaded.copy()
+                else:
+                    raise ValueError("unexpected dividend data shape")
+
+                if "Dividends" not in history.columns:
+                    continue
+
+                dividends = pd.to_numeric(
+                    history["Dividends"], errors="coerce"
+                ).fillna(0)
+                dividends = dividends[dividends > 0]
+
+                if not dividends.empty and "Stock Splits" in history.columns:
+                    splits = pd.to_numeric(
+                        history["Stock Splits"], errors="coerce"
+                    ).fillna(0)
+                    if ((splits > 0) & (splits != 1)).any():
+                        event_history = yf.Ticker(ticker).history(
+                            start=(pd.Timestamp(start_date) - pd.Timedelta(days=30)).date(),
+                            end=(pd.Timestamp(end_date) + pd.Timedelta(days=2)).date(),
+                            auto_adjust=False,
+                            actions=True,
+                        )
+                        if not event_history.empty:
+                            normalized = _dividends_on_current_share_basis(event_history)
+                            by_date = {idx.date(): value for idx, value in normalized.items()}
+                            dividends = pd.Series(
+                                [
+                                    by_date.get(pd.Timestamp(idx).date(), value)
+                                    for idx, value in dividends.items()
+                                ],
+                                index=dividends.index,
+                                dtype=float,
+                            )
+
+                for event_index, amount in dividends.items():
+                    event_date = pd.Timestamp(event_index).date()
+                    if not (start_date <= event_date < end_date):
+                        continue
+                    records.append({
+                        "ticker": ticker,
+                        "event_date": event_date,
+                        "amount_per_unit": float(amount),
+                        "currency": str(currency_by_ticker.get(ticker, "") or ""),
+                        "price_unit": 1.0,
+                        "source": "yfinance",
+                    })
+            except Exception as error:
+                warnings.append(
+                    f"{ticker} 配当履歴取得失敗: {type(error).__name__}"
+                )
+
+    fund_rows = data[
+        data["instrument_type"].eq("mutual_fund")
+        & data["fund_code"].ne("")
+    ][["ticker", "fund_code"]].drop_duplicates()
+
+    for _, fund_row in fund_rows.iterrows():
+        ticker = str(fund_row["ticker"])
+        code = str(fund_row["fund_code"])
+        try:
+            distributions, source, source_warnings = (
+                get_mutual_fund_distribution_history(code)
+            )
+            warnings.extend(
+                [f"{ticker}: {warning}" for warning in source_warnings]
+            )
+            for event_index, amount in distributions.items():
+                event_date = pd.Timestamp(event_index).date()
+                if not (start_date <= event_date < end_date):
+                    continue
+                amount = float(amount)
+                if amount <= 0:
+                    continue
+                records.append({
+                    "ticker": ticker,
+                    "event_date": event_date,
+                    "amount_per_unit": amount,
+                    "currency": "JPY",
+                    "price_unit": 10000.0,
+                    "source": source,
+                })
+        except Exception as error:
+            warnings.append(
+                f"{ticker} 分配金履歴取得失敗: {type(error).__name__}"
+            )
+
+    events = pd.DataFrame(records, columns=columns)
+    if not events.empty:
+        events["event_date"] = pd.to_datetime(events["event_date"]).dt.date
+        events = events.sort_values(
+            ["event_date", "ticker"]
+        ).reset_index(drop=True)
+
+    return events, list(dict.fromkeys(warnings))
+
+
+def attach_income_effects(detail, income_events):
+    """Attach estimated gross/after-tax cash-income effects to attribution rows.
+
+    Events are assigned to intervals [start_date, end_date). Quantity at the
+    start snapshot is used, because entitlement is determined before/at the
+    corporate-action date. FX uses the midpoint of the two daily snapshot FX
+    rates when payout currency is foreign.
+
+    This estimates investment income; it does not assert the cash was actually
+    credited to a tracked cash account on that date.
+    """
+    result = detail.copy()
+    for column in [
+        "income_effect_gross", "income_effect_after_tax",
+        "income_event_count",
+    ]:
+        result[column] = 0.0
+
+    if result.empty or income_events is None or income_events.empty:
+        result["total_return_effect_gross"] = result.get(
+            "investment_effect", pd.Series(index=result.index, dtype=float)
+        )
+        result["total_return_effect_after_tax"] = result.get(
+            "investment_effect", pd.Series(index=result.index, dtype=float)
+        )
+        return result
+
+    events = income_events.copy()
+    events["event_date"] = pd.to_datetime(
+        events["event_date"], errors="coerce"
+    ).dt.date
+    events["amount_per_unit"] = pd.to_numeric(
+        events["amount_per_unit"], errors="coerce"
+    ).fillna(0.0)
+
+    from mutual_funds import FUND_SPECS
+
+    for index, row in result.iterrows():
+        ticker = str(row.get("ticker", "") or "")
+        if not ticker or ticker.upper() == "CASH":
+            continue
+
+        start_date = pd.Timestamp(row["start_date"]).date()
+        end_date = pd.Timestamp(row["end_date"]).date()
+        matched = events[
+            events["ticker"].eq(ticker)
+            & events["event_date"].ge(start_date)
+            & events["event_date"].lt(end_date)
+        ]
+        if matched.empty:
+            continue
+
+        q0 = float(row.get("quantity_start", 0) or 0)
+        if q0 <= 0:
+            continue
+
+        price_unit = float(row.get("price_unit", 1) or 1)
+        currency = str(row.get("currency", "") or "").upper()
+        if currency == "JPY":
+            fx = 1.0
+        else:
+            fx0 = float(row.get("fx_start", 1) or 1)
+            fx1 = float(row.get("fx_end", fx0) or fx0)
+            fx = (fx0 + fx1) / 2.0
+
+        amount_per_unit = float(matched["amount_per_unit"].sum())
+        gross_jpy = q0 / price_unit * amount_per_unit * fx
+
+        tax_row = {
+            "annual_div_jpy": gross_jpy,
+            "ticker": ticker,
+            "currency": currency,
+            "account_type": row.get("account_type", ""),
+            "instrument_type": row.get("instrument_type", ""),
+            "foreign_tax_adjustment": False,
+            "underlying_foreign_tax_rate": 0.0,
+        }
+        fund_code = str(row.get("fund_code", "") or "")
+        if fund_code in FUND_SPECS:
+            spec = FUND_SPECS[fund_code]
+            tax_row["foreign_tax_adjustment"] = spec.get(
+                "foreign_tax_adjustment", False
+            )
+            tax_row["underlying_foreign_tax_rate"] = spec.get(
+                "underlying_foreign_tax_rate", 0.0
+            )
+
+        after_tax_jpy = calc_after_tax_dividend(tax_row)
+
+        result.at[index, "income_effect_gross"] = gross_jpy
+        result.at[index, "income_effect_after_tax"] = after_tax_jpy
+        result.at[index, "income_event_count"] = int(len(matched))
+
+    result["total_return_effect_gross"] = (
+        result["investment_effect"] + result["income_effect_gross"]
+    )
+    result["total_return_effect_after_tax"] = (
+        result["investment_effect"] + result["income_effect_after_tax"]
+    )
+    return result
+
+
+def calculate_estimated_total_return_twr(
+    detail, income_column="income_effect_gross"
+):
+    """Chain-link daily returns including dividend/distribution income."""
+    if detail is None or detail.empty:
+        return pd.DataFrame(), {
+            "valid": False,
+            "twr": None,
+            "periods": 0,
+            "income_effect": 0.0,
+            "return_effect": 0.0,
+            "invalid_periods": 0,
+            "method": "daily_modified_dietz_midpoint_total_return",
+        }
+    if income_column not in detail.columns:
+        raise ValueError(f"missing income column: {income_column}")
+
+    work = detail.copy()
+    work["return_effect"] = (
+        pd.to_numeric(work["investment_effect"], errors="coerce").fillna(0.0)
+        + pd.to_numeric(work[income_column], errors="coerce").fillna(0.0)
+    )
+
+    daily = (
+        work.groupby(["start_date", "end_date"], as_index=False)[
+            [
+                "value_start", "value_end", "total_change",
+                "flow_effect", "return_effect", income_column,
+            ]
+        ]
+        .sum()
+        .sort_values("end_date")
+        .reset_index(drop=True)
+    )
+    daily["capital_base"] = daily["value_start"] + 0.5 * daily["flow_effect"]
+    daily["period_return"] = daily["return_effect"] / daily["capital_base"]
+
+    invalid = (
+        ~pd.to_numeric(daily["capital_base"], errors="coerce").gt(0)
+        | ~pd.to_numeric(daily["period_return"], errors="coerce").notna()
+        | daily["period_return"].le(-1.0)
+    )
+    daily["valid_return"] = ~invalid
+    daily.loc[invalid, "period_return"] = float("nan")
+
+    summary = {
+        "valid": not bool(invalid.any()),
+        "twr": None,
+        "periods": int(len(daily)),
+        "income_effect": float(daily[income_column].sum()),
+        "return_effect": float(daily["return_effect"].sum()),
+        "invalid_periods": int(invalid.sum()),
+        "method": "daily_modified_dietz_midpoint_total_return",
+    }
+    if invalid.any():
+        return daily, summary
+
+    daily["cumulative_twr"] = (1.0 + daily["period_return"]).cumprod() - 1.0
+    summary["twr"] = float(daily.iloc[-1]["cumulative_twr"])
+    return daily, summary
 
 
 def calculate_estimated_twr(detail):

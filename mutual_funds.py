@@ -260,6 +260,47 @@ def _official_record(code, spec):
     return date, nav, delta, distributions, history, warnings
 
 
+def get_mutual_fund_distribution_history(fund_code):
+    """Return distribution history per 10,000 units.
+
+    Source priority mirrors valuation: Yahoo! Finance Japan first, then the
+    fund provider. This helper is used only for total-return attribution; it
+    never substitutes an ETF distribution for the actual fund distribution.
+    """
+    code = str(fund_code).strip()
+    try:
+        spec = FUND_SPECS[code]
+    except KeyError as error:
+        raise ValueError("unsupported mutual fund code") from error
+
+    try:
+        distributions = _yahoo_distributions(code)
+        return distributions.sort_index(), "yahoo_finance", []
+    except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as yahoo_error:
+        yahoo_error_name = type(yahoo_error).__name__
+
+    try:
+        _, _, _, distributions, _, warnings = _official_record(code, spec)
+        return (
+            distributions.sort_index(),
+            "official_or_provider",
+            [f"Yahoo分配金取得失敗({yahoo_error_name})のため第2ソースを使用"] + warnings,
+        )
+    except (
+        requests.RequestException,
+        ValueError,
+        KeyError,
+        IndexError,
+        StopIteration,
+        TypeError,
+        ET.ParseError,
+    ) as official_error:
+        raise ValueError(
+            "mutual fund distribution history unavailable: "
+            f"yahoo={yahoo_error_name}, official={type(official_error).__name__}"
+        ) from official_error
+
+
 def _business_days_old(base_date, today):
     base = pd.Timestamp(base_date)
     end = pd.Timestamp(today)
