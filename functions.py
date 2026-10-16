@@ -463,7 +463,7 @@ def build_current_market_movers(df, top_n=10):
     return gainers, losers
 
 
-ATTRIBUTION_SCHEMA_VERSION = 2
+ATTRIBUTION_SCHEMA_VERSION = 3
 
 
 DAILY_LOG_V2_HEADERS = [
@@ -1080,6 +1080,108 @@ def summarize_attribution(detail, group_by):
         .sum()
     )
     return result.sort_values("investment_effect", ascending=False).reset_index(drop=True)
+
+
+def calculate_estimated_twr(detail):
+    """Chain daily flow-adjusted portfolio returns from attribution detail.
+
+    Exact TWR needs a portfolio valuation immediately before every external
+    cash flow. Daily_Log_V2 has daily snapshots but no intraday flow timestamps,
+    so this uses a daily Modified-Dietz-style midpoint assumption:
+
+        daily return = investment effect / (start value + 0.5 * flow effect)
+
+    Daily returns are chain-linked. Internal buys/sells normally offset at the
+    total-portfolio level; remaining quantity/flow effect acts as the cash-flow
+    adjustment. This is therefore labelled estimated TWR in the UI.
+    """
+    empty_summary = {
+        "valid": False,
+        "twr": None,
+        "periods": 0,
+        "start_value": 0.0,
+        "end_value": 0.0,
+        "total_change": 0.0,
+        "flow_effect": 0.0,
+        "investment_effect": 0.0,
+        "simple_asset_change": None,
+        "invalid_periods": 0,
+        "method": "daily_modified_dietz_midpoint",
+    }
+    if detail is None or detail.empty:
+        return pd.DataFrame(), empty_summary
+
+    required = {
+        "start_date", "end_date", "value_start", "value_end",
+        "total_change", "flow_effect", "investment_effect",
+    }
+    missing = sorted(required - set(detail.columns))
+    if missing:
+        raise ValueError(
+            "attribution detail missing TWR columns: " + ", ".join(missing)
+        )
+
+    daily = (
+        detail.groupby(["start_date", "end_date"], as_index=False)[
+            [
+                "value_start", "value_end", "total_change",
+                "flow_effect", "investment_effect",
+            ]
+        ]
+        .sum()
+        .sort_values("end_date")
+        .reset_index(drop=True)
+    )
+
+    daily["capital_base"] = (
+        daily["value_start"] + 0.5 * daily["flow_effect"]
+    )
+    daily["period_return"] = daily["investment_effect"] / daily["capital_base"]
+
+    invalid = (
+        ~pd.to_numeric(daily["capital_base"], errors="coerce").gt(0)
+        | ~pd.to_numeric(daily["period_return"], errors="coerce").notna()
+        | daily["period_return"].le(-1.0)
+    )
+    daily["valid_return"] = ~invalid
+    daily.loc[invalid, "period_return"] = float("nan")
+
+    if invalid.any():
+        summary = empty_summary.copy()
+        summary.update({
+            "periods": int(len(daily)),
+            "start_value": float(daily.iloc[0]["value_start"]),
+            "end_value": float(daily.iloc[-1]["value_end"]),
+            "total_change": float(daily["total_change"].sum()),
+            "flow_effect": float(daily["flow_effect"].sum()),
+            "investment_effect": float(daily["investment_effect"].sum()),
+            "invalid_periods": int(invalid.sum()),
+        })
+        return daily, summary
+
+    daily["cumulative_twr"] = (1.0 + daily["period_return"]).cumprod() - 1.0
+
+    start_value = float(daily.iloc[0]["value_start"])
+    end_value = float(daily.iloc[-1]["value_end"])
+    simple_asset_change = (
+        end_value / start_value - 1.0
+        if start_value > 0 else None
+    )
+
+    summary = {
+        "valid": True,
+        "twr": float(daily.iloc[-1]["cumulative_twr"]),
+        "periods": int(len(daily)),
+        "start_value": start_value,
+        "end_value": end_value,
+        "total_change": float(daily["total_change"].sum()),
+        "flow_effect": float(daily["flow_effect"].sum()),
+        "investment_effect": float(daily["investment_effect"].sum()),
+        "simple_asset_change": simple_asset_change,
+        "invalid_periods": 0,
+        "method": "daily_modified_dietz_midpoint",
+    }
+    return daily, summary
 
 
 def daily_log_migration_names(df_log, start_date, end_date):
