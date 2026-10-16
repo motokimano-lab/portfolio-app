@@ -1048,6 +1048,78 @@ def attribution_between_snapshots(
     return pd.DataFrame(records)
 
 
+def summarize_attribution_detail(detail):
+    """Summarize already-computed attribution rows."""
+    empty_summary = {
+        "available_dates": [], "actual_start": None, "actual_end": None,
+        "total_change": 0.0, "flow_effect": 0.0, "market_effect": 0.0,
+        "fx_effect": 0.0, "residual_effect": 0.0, "investment_effect": 0.0,
+        "fund_fx_estimated": False,
+    }
+    if detail is None or detail.empty:
+        return pd.DataFrame(), empty_summary
+    work = detail.copy()
+    daily = (
+        work.groupby("end_date", as_index=False)[
+            ["total_change", "flow_effect", "market_effect", "fx_effect",
+             "residual_effect", "investment_effect"]
+        ].sum().rename(columns={"end_date": "date"})
+    )
+    starts = pd.to_datetime(work["start_date"], errors="coerce").dt.date.dropna()
+    ends = pd.to_datetime(work["end_date"], errors="coerce").dt.date.dropna()
+    available_dates = sorted(set(starts.tolist()) | set(ends.tolist()))
+    summary = {
+        "available_dates": available_dates,
+        "actual_start": min(starts) if not starts.empty else None,
+        "actual_end": max(ends) if not ends.empty else None,
+        "total_change": float(work["total_change"].sum()),
+        "flow_effect": float(work["flow_effect"].sum()),
+        "market_effect": float(work["market_effect"].sum()),
+        "fx_effect": float(work["fx_effect"].sum()),
+        "residual_effect": float(work["residual_effect"].sum()),
+        "investment_effect": float(work["investment_effect"].sum()),
+        "fund_fx_estimated": bool(
+            work.get("fund_fx_estimated", pd.Series(False, index=work.index)).fillna(False).any()
+        ),
+    }
+    return daily, summary
+
+
+def build_history_gap_row(
+    df_log, df_v2, historical_end, v2_start
+):
+    """Represent the legacy->V2 bridge as explicitly unclassified residual."""
+    if df_log is None or df_log.empty or df_v2 is None or df_v2.empty:
+        return pd.DataFrame()
+    old = df_log.copy()
+    old["date"] = pd.to_datetime(old["date"], errors="coerce").dt.date
+    old["value_jpy"] = pd.to_numeric(
+        old["value_jpy"].astype(str).str.replace(",", "", regex=False),
+        errors="coerce",
+    ).fillna(0.0)
+    v2 = normalize_daily_log_v2(df_v2)
+    historical_end = pd.Timestamp(historical_end).date()
+    v2_start = pd.Timestamp(v2_start).date()
+    old_value = float(old.loc[old["date"].eq(historical_end), "value_jpy"].sum())
+    new_value = float(v2.loc[v2["date"].eq(v2_start), "value_jpy"].sum())
+    if old_value <= 0 or new_value <= 0:
+        return pd.DataFrame()
+    change = new_value - old_value
+    row = {
+        "start_date": historical_end, "end_date": v2_start,
+        "owner": "", "account_type": "", "ticker": "HISTORY_GAP",
+        "display_name": "履歴切替/未分解", "asset_class": "未分解",
+        "sector": "履歴切替", "currency": "JPY", "instrument_type": "",
+        "fund_code": "", "product_name": "", "price_unit": 1.0,
+        "purpose": "", "role": "", "value_start": old_value,
+        "value_end": new_value, "total_change": change, "flow_effect": 0.0,
+        "market_effect": 0.0, "fx_effect": 0.0, "residual_effect": change,
+        "fund_fx_estimated": False, "attribution_method": "history_gap",
+        "market_group": "履歴切替/未分解", "fx_driver_currency": "JPY",
+        "market_fx_effect": 0.0, "investment_effect": change,
+    }
+    return pd.DataFrame([row])
+
 def analyze_attribution_period(
     df_v2, start_date=None, end_date=None, fund_reference=None
 ):
