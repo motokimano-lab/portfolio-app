@@ -1199,6 +1199,7 @@ if st.button("📅 今日の資産を記録"):
         detail_result = functions.save_daily_log_v2(df, creds_dict, fund_status)
     load_daily_log_detail.clear()
     load_daily_log_v2.clear()
+    load_fund_reference_data.clear()
 
     st.success(result + " / " + detail_result)
     
