@@ -463,6 +463,9 @@ def build_current_market_movers(df, top_n=10):
     return gainers, losers
 
 
+ATTRIBUTION_SCHEMA_VERSION = 2
+
+
 DAILY_LOG_V2_HEADERS = [
     "date", "snapshot_at", "owner", "account_type", "ticker", "display_name",
     "asset_class", "sector", "currency", "instrument_type", "fund_code",
