@@ -1141,14 +1141,14 @@ else:
                 "残りが給与・賞与・配当などの純資金流入/流出として残ります。"
             )
         else:
-            external_flow_est = attr["flow_effect"] - net_income_est
             flow1, flow2, flow3 = st.columns(3)
-            flow1.metric("給与・賞与等の純入金（推定）", f"{external_flow_est:+,.0f} 円")
-            flow2.metric("配当・分配金（税引後推計）", f"{net_income_est:+,.0f} 円")
+            flow1.metric("純資金フロー（推定）", f"{attr['flow_effect']:+,.0f} 円")
+            flow2.metric("配当イベント（税引後推計）", f"{net_income_est:+,.0f} 円")
             flow3.metric("市場＋為替等の運用要因", f"{attr['investment_effect']:+,.0f} 円")
             st.caption(
-                "株の買付・売却は株側と現金側が相殺される前提です。純資金フローから推定配当を除いた残りを、"
-                "給与・賞与・その他入出金の推定値として表示しています。"
+                "株の買付・売却は株側と現金側が相殺されるため、全体の純資金フローには主に給与・賞与・"
+                "配当受取・その他入出金が残ります。配当イベントは権利落ち日ベースで、実際の入金日は後日になるため、"
+                "純資金フローから配当を単純控除して給与額とは扱いません。"
             )
 
         if has_history_bridge:
