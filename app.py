@@ -24,7 +24,7 @@ import functions
 # Streamlit can rerun app.py in the same Python process after a Git deploy while
 # an imported helper module remains cached. Reload only when a newly deployed
 # attribution helper is missing, so app.py and functions.py cannot get out of sync.
-if getattr(functions, "ATTRIBUTION_SCHEMA_VERSION", 0) != 4:
+if getattr(functions, "ATTRIBUTION_SCHEMA_VERSION", 0) != 5:
     import importlib
     functions = importlib.reload(functions)
 print(dir(functions))
@@ -149,6 +149,13 @@ def load_fund_reference_data(df_v2):
 @st.cache_data(ttl=21600)
 def load_income_event_data(df_v2):
     return functions.build_income_event_data(df_v2)
+
+@st.cache_data(ttl=21600)
+def load_reconstructed_history(df_log):
+    references, reference_warnings = functions.build_historical_reference_data(df_log)
+    detail, info = functions.reconstruct_historical_attribution(df_log, references)
+    info["reference_warnings"] = reference_warnings
+    return detail, info
 
 # 為替取得
 usd_jpy, usd_error = get_fx("JPY=X", 150)
@@ -419,6 +426,7 @@ if st.sidebar.button("最新データを再取得"):
     load_daily_log_v2.clear()
     load_fund_reference_data.clear()
     load_income_event_data.clear()
+    load_reconstructed_history.clear()
 
     st.sidebar.success("最新データを再取得します")
 
@@ -1468,6 +1476,7 @@ if st.button("📅 今日の資産を記録"):
     load_daily_log_v2.clear()
     load_fund_reference_data.clear()
     load_income_event_data.clear()
+    load_reconstructed_history.clear()
 
     st.success(result + " / " + detail_result)
     
