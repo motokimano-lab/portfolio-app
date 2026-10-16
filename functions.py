@@ -1131,6 +1131,177 @@ def summarize_attribution(detail, group_by):
     return result.sort_values("investment_effect", ascending=False).reset_index(drop=True)
 
 
+def _shapley_dividend_capacity_effects(
+    q0, d0, f0, q1, d1, f1, price_unit
+):
+    """Exact symmetric decomposition of annual dividend capacity.
+
+    Factors are quantity, per-unit annual dividend run-rate, and FX.
+    Interaction terms are shared symmetrically so the three effects add exactly
+    to the change in annual JPY dividend capacity.
+    """
+    from itertools import permutations
+
+    old = {"quantity": float(q0), "dividend": float(d0), "fx": float(f0)}
+    new = {"quantity": float(q1), "dividend": float(d1), "fx": float(f1)}
+    effects = {"quantity": 0.0, "dividend": 0.0, "fx": 0.0}
+    unit = float(price_unit) if price_unit else 1.0
+
+    def value(state):
+        return state["quantity"] / unit * state["dividend"] * state["fx"]
+
+    orders = list(permutations(("quantity", "dividend", "fx")))
+    for order in orders:
+        state = old.copy()
+        before = value(state)
+        for factor in order:
+            state[factor] = new[factor]
+            after = value(state)
+            effects[factor] += after - before
+            before = after
+
+    divisor = float(len(orders))
+    return {key: value_ / divisor for key, value_ in effects.items()}
+
+
+def analyze_dividend_capacity_period(
+    df_v2, start_date=None, end_date=None, after_tax=True
+):
+    """Explain changes in annual dividend capacity between two V2 snapshots.
+
+    Endpoint annualized forecast is decomposed into quantity, per-unit dividend
+    run-rate, and FX effects. After-tax mode aligns with the take-home target.
+    """
+    data = normalize_daily_log_v2(df_v2)
+    capacity_column = (
+        "after_tax_div_forecast_jpy"
+        if after_tax else "annual_div_forecast_jpy"
+    )
+    empty_summary = {
+        "available_dates": [], "actual_start": None, "actual_end": None,
+        "total_start": 0.0, "total_end": 0.0, "total_change": 0.0,
+        "quantity_effect": 0.0, "dividend_effect": 0.0, "fx_effect": 0.0,
+        "after_tax": bool(after_tax),
+    }
+    if data.empty:
+        return pd.DataFrame(), empty_summary
+
+    completeness = (
+        data.groupby("date")[capacity_column]
+        .apply(lambda series: series.notna().all())
+    )
+    dates = sorted(completeness[completeness].index.tolist())
+    if start_date is not None:
+        start_date = pd.Timestamp(start_date).date()
+        dates = [d for d in dates if d >= start_date]
+    if end_date is not None:
+        end_date = pd.Timestamp(end_date).date()
+        dates = [d for d in dates if d <= end_date]
+    empty_summary["available_dates"] = dates
+    if len(dates) < 2:
+        return pd.DataFrame(), empty_summary
+
+    actual_start = dates[0]
+    actual_end = dates[-1]
+    before = data[data["date"].eq(actual_start)].copy()
+    after = data[data["date"].eq(actual_end)].copy()
+
+    def snapshot(frame):
+        records = []
+        for _, row in frame.iterrows():
+            quantity = float(row.get("quantity", 0) or 0)
+            fx = float(row.get("fx_to_jpy", 1) or 1)
+            unit = float(row.get("price_unit", 1) or 1)
+            capacity = pd.to_numeric(
+                pd.Series([row.get(capacity_column)]), errors="coerce"
+            ).iloc[0]
+            if pd.isna(capacity):
+                continue
+            if quantity > 0 and fx > 0:
+                effective_per_unit = float(capacity) * unit / quantity / fx
+            else:
+                effective_per_unit = 0.0
+            records.append({
+                **{column: row.get(column, "") for column in ATTRIBUTION_ID_COLUMNS},
+                "quantity": quantity, "fx_to_jpy": fx, "price_unit": unit,
+                "capacity_jpy": float(capacity),
+                "dividend_per_unit_effective": effective_per_unit,
+            })
+        if not records:
+            return pd.DataFrame()
+        frame_out = pd.DataFrame(records)
+        return (
+            frame_out.groupby(ATTRIBUTION_ID_COLUMNS, dropna=False, as_index=False)
+            .agg(
+                quantity=("quantity", "sum"),
+                fx_to_jpy=("fx_to_jpy", "first"),
+                price_unit=("price_unit", "first"),
+                capacity_jpy=("capacity_jpy", "sum"),
+                dividend_per_unit_effective=("dividend_per_unit_effective", "first"),
+            )
+        )
+
+    start_snapshot = snapshot(before)
+    end_snapshot = snapshot(after)
+    start_map = {}
+    end_map = {}
+
+    def key_for(row):
+        return tuple(row[column] for column in ATTRIBUTION_ID_COLUMNS)
+
+    for _, row in start_snapshot.iterrows():
+        start_map[key_for(row)] = row
+    for _, row in end_snapshot.iterrows():
+        end_map[key_for(row)] = row
+
+    records = []
+    all_keys = sorted(set(start_map) | set(end_map), key=lambda value: tuple(map(str, value)))
+    for key in all_keys:
+        row0 = start_map.get(key)
+        row1 = end_map.get(key)
+        meta = row1 if row1 is not None else row0
+        unit = float(meta["price_unit"] or 1.0)
+        if row0 is None:
+            start_capacity = 0.0
+            end_capacity = float(row1["capacity_jpy"])
+            effects = {"quantity": end_capacity, "dividend": 0.0, "fx": 0.0}
+        elif row1 is None:
+            start_capacity = float(row0["capacity_jpy"])
+            end_capacity = 0.0
+            effects = {"quantity": -start_capacity, "dividend": 0.0, "fx": 0.0}
+        else:
+            start_capacity = float(row0["capacity_jpy"])
+            end_capacity = float(row1["capacity_jpy"])
+            effects = _shapley_dividend_capacity_effects(
+                row0["quantity"], row0["dividend_per_unit_effective"], row0["fx_to_jpy"],
+                row1["quantity"], row1["dividend_per_unit_effective"], row1["fx_to_jpy"],
+                unit,
+            )
+            rounding_residual = end_capacity - start_capacity - sum(effects.values())
+            effects["dividend"] += rounding_residual
+        records.append({
+            "start_date": actual_start, "end_date": actual_end,
+            **{column: meta[column] for column in ATTRIBUTION_ID_COLUMNS},
+            "capacity_start": start_capacity, "capacity_end": end_capacity,
+            "total_change": end_capacity - start_capacity,
+            "quantity_effect": effects["quantity"],
+            "dividend_effect": effects["dividend"],
+            "fx_effect": effects["fx"],
+        })
+
+    detail = pd.DataFrame(records)
+    summary = {
+        "available_dates": dates, "actual_start": actual_start, "actual_end": actual_end,
+        "total_start": float(detail["capacity_start"].sum()),
+        "total_end": float(detail["capacity_end"].sum()),
+        "total_change": float(detail["total_change"].sum()),
+        "quantity_effect": float(detail["quantity_effect"].sum()),
+        "dividend_effect": float(detail["dividend_effect"].sum()),
+        "fx_effect": float(detail["fx_effect"].sum()),
+        "after_tax": bool(after_tax),
+    }
+    return detail, summary
+
 def build_income_event_data(df_v2):
     """Fetch actual dividend/distribution events for securities in V2.
 
