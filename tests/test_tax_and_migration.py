@@ -202,7 +202,11 @@ class TaxAndMigrationTests(unittest.TestCase):
         self.assertAlmostEqual(cash.market_effect,0)
         self.assertGreater(cash.flow_effect,0)
         self.assertGreater(cash.fx_effect,0)
+        self.assertEqual(cash.market_group,'現金')
+        self.assertEqual(cash.fx_driver_currency,'USD')
         stock=detail.loc[detail.ticker.eq('AAA')].iloc[0]
+        self.assertEqual(stock.market_group,'Tech')
+        self.assertEqual(stock.fx_driver_currency,'USD')
         self.assertGreater(stock.flow_effect,0)
         self.assertGreater(stock.market_effect,0)
         self.assertGreater(stock.fx_effect,0)
@@ -245,6 +249,8 @@ class TaxAndMigrationTests(unittest.TestCase):
         item=detail.iloc[0]
         self.assertTrue(item.fund_fx_estimated)
         self.assertEqual(item.attribution_method,'fund_proxy_estimate')
+        self.assertEqual(item.market_group,'米国株投信')
+        self.assertEqual(item.fx_driver_currency,'USD')
         self.assertGreater(item.market_effect,0)
         self.assertGreater(item.fx_effect,0)
         self.assertLess(item.residual_effect,0)
@@ -260,6 +266,11 @@ class TaxAndMigrationTests(unittest.TestCase):
             places=8,
         )
         self.assertTrue(summary['fund_fx_estimated'])
+        self.assertAlmostEqual(
+            summary['investment_effect'],
+            summary['market_effect']+summary['fx_effect']+summary['residual_effect'],
+            places=8,
+        )
 
     def test_us_fund_without_reference_falls_back_safely(self):
         columns=DAILY_LOG_V2_HEADERS
