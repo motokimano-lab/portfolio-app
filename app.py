@@ -1125,8 +1125,40 @@ else:
                 " 投信proxy参照がない期間は従来方式で計算します。"
             )
 
+        has_reconstructed_history = detail_attr["attribution_method"].astype(str).str.startswith(
+            "historical_reconstructed"
+        ).any()
+        residual_label = "未分解/その他" if has_reconstructed_history or has_history_bridge else "投信乖離/その他"
+
+        net_income_est = float(
+            pd.to_numeric(detail_attr.get("income_effect_after_tax", 0), errors="coerce").fillna(0).sum()
+        ) if "income_effect_after_tax" in detail_attr.columns else 0.0
+
+        if has_reconstructed_history:
+            st.info(
+                f"純資金フロー（推定・配当等を含む）: {attr['flow_effect']:+,.0f} 円。"
+                "旧Daily_Log期間は売買時の現金減少が同時記録されているため、内部売買は全体では概ね相殺され、"
+                "残りが給与・賞与・配当などの純資金流入/流出として残ります。"
+            )
+        else:
+            external_flow_est = attr["flow_effect"] - net_income_est
+            flow1, flow2, flow3 = st.columns(3)
+            flow1.metric("給与・賞与等の純入金（推定）", f"{external_flow_est:+,.0f} 円")
+            flow2.metric("配当・分配金（税引後推計）", f"{net_income_est:+,.0f} 円")
+            flow3.metric("市場＋為替等の運用要因", f"{attr['investment_effect']:+,.0f} 円")
+            st.caption(
+                "株の買付・売却は株側と現金側が相殺される前提です。純資金フローから推定配当を除いた残りを、"
+                "給与・賞与・その他入出金の推定値として表示しています。"
+            )
+
+        if has_history_bridge:
+            st.warning(
+                "2026/10/13→10/15は旧ログからV2への切替区間です。10/14ログが不完全で、"
+                "投信評価方法も切り替わったため、この区間の差額は「未分解/その他」に置いています。"
+            )
+
         factor_df = pd.DataFrame({
-            "要因": ["数量・資金/売買", "市場", "為替", "投信乖離/その他"],
+            "要因": ["数量・資金/売買", "市場", "為替", residual_label],
             "寄与額": [
                 attr["flow_effect"], attr["market_effect"], attr["fx_effect"], attr["residual_effect"]
             ],
