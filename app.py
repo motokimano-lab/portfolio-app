@@ -24,7 +24,7 @@ import functions
 # Streamlit can rerun app.py in the same Python process after a Git deploy while
 # an imported helper module remains cached. Reload only when a newly deployed
 # attribution helper is missing, so app.py and functions.py cannot get out of sync.
-if not hasattr(functions, "analyze_attribution_period"):
+if getattr(functions, "ATTRIBUTION_SCHEMA_VERSION", 0) != 2:
     import importlib
     functions = importlib.reload(functions)
 print(dir(functions))
