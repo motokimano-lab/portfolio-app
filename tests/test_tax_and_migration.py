@@ -8,7 +8,7 @@ from dividend_tax import calc_after_tax_dividend, normalize_account_type
 from functions import (
     normalize_positions, compare_portfolio, compare_latest_logs,
     save_daily_log_detail, save_daily_log_v2, DAILY_LOG_V2_HEADERS,
-    analyze_attribution_period, summarize_attribution
+    analyze_attribution_period, summarize_attribution, calculate_estimated_twr
 )
 
 
@@ -313,6 +313,55 @@ class TaxAndMigrationTests(unittest.TestCase):
             summary['total_change'],
             places=6,
         )
+
+    def test_estimated_twr_chain_links_daily_returns(self):
+        detail = pd.DataFrame([
+            dict(
+                start_date=date(2026,10,15), end_date=date(2026,10,16),
+                value_start=100.0, value_end=110.0, total_change=10.0,
+                flow_effect=0.0, investment_effect=10.0,
+            ),
+            dict(
+                start_date=date(2026,10,16), end_date=date(2026,10,17),
+                value_start=110.0, value_end=115.5, total_change=5.5,
+                flow_effect=0.0, investment_effect=5.5,
+            ),
+        ])
+        daily, summary = calculate_estimated_twr(detail)
+        self.assertTrue(summary['valid'])
+        self.assertAlmostEqual(daily.iloc[0].period_return, 0.10)
+        self.assertAlmostEqual(daily.iloc[1].period_return, 0.05)
+        self.assertAlmostEqual(summary['twr'], 0.155)
+        self.assertAlmostEqual(summary['investment_effect'], 15.5)
+        self.assertEqual(summary['periods'], 2)
+
+    def test_estimated_twr_uses_midpoint_flow_adjustment(self):
+        detail = pd.DataFrame([
+            dict(
+                start_date=date(2026,10,15), end_date=date(2026,10,16),
+                value_start=100.0, value_end=215.0, total_change=115.0,
+                flow_effect=100.0, investment_effect=15.0,
+            ),
+        ])
+        daily, summary = calculate_estimated_twr(detail)
+        self.assertTrue(summary['valid'])
+        self.assertAlmostEqual(daily.iloc[0].capital_base, 150.0)
+        self.assertAlmostEqual(daily.iloc[0].period_return, 0.10)
+        self.assertAlmostEqual(summary['twr'], 0.10)
+        self.assertAlmostEqual(summary['simple_asset_change'], 1.15)
+
+    def test_estimated_twr_rejects_nonpositive_capital_base(self):
+        detail = pd.DataFrame([
+            dict(
+                start_date=date(2026,10,15), end_date=date(2026,10,16),
+                value_start=10.0, value_end=0.0, total_change=-10.0,
+                flow_effect=-30.0, investment_effect=20.0,
+            ),
+        ])
+        daily, summary = calculate_estimated_twr(detail)
+        self.assertFalse(summary['valid'])
+        self.assertEqual(summary['invalid_periods'], 1)
+        self.assertTrue(pd.isna(daily.iloc[0].period_return))
 
     def test_v2_snapshot_keeps_legacy_comparison_separate(self):
         from datetime import datetime
