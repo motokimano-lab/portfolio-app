@@ -956,6 +956,24 @@ def attribution_between_snapshots(
             residual = total_change - sum(effects.values())
             effects["market"] += residual
 
+        ticker_text = str(meta_source.get("ticker", "") or "").strip().upper()
+        sector_text = str(meta_source.get("sector", "") or "").strip()
+        asset_class_text = str(meta_source.get("asset_class", "") or "").strip()
+        currency_text = str(meta_source.get("currency", "") or "").strip().upper()
+
+        if ticker_text == "CASH":
+            market_group = "現金"
+        elif is_fund:
+            market_group = "米国株投信"
+        elif sector_text:
+            market_group = sector_text
+        elif asset_class_text:
+            market_group = asset_class_text
+        else:
+            market_group = "未分類"
+
+        fx_driver_currency = "USD" if fund_fx_estimated else (currency_text or "JPY")
+
         record = {
             "start_date": start_date,
             "end_date": end_date,
@@ -969,6 +987,8 @@ def attribution_between_snapshots(
             "residual_effect": residual_effect,
             "fund_fx_estimated": fund_fx_estimated,
             "attribution_method": attribution_method,
+            "market_group": market_group,
+            "fx_driver_currency": fx_driver_currency,
         }
         record["market_fx_effect"] = record["market_effect"] + record["fx_effect"]
         record["investment_effect"] = (
@@ -993,6 +1013,7 @@ def analyze_attribution_period(
         "market_effect": 0.0,
         "fx_effect": 0.0,
         "residual_effect": 0.0,
+        "investment_effect": 0.0,
         "fund_fx_estimated": False,
     }
     if data.empty:
@@ -1023,7 +1044,7 @@ def analyze_attribution_period(
     detail = pd.concat(pieces, ignore_index=True) if pieces else pd.DataFrame()
     daily = (
         detail.groupby("end_date", as_index=False)[
-            ["total_change", "flow_effect", "market_effect", "fx_effect", "residual_effect"]
+            ["total_change", "flow_effect", "market_effect", "fx_effect", "residual_effect", "investment_effect"]
         ]
         .sum()
         .rename(columns={"end_date": "date"})
@@ -1038,6 +1059,7 @@ def analyze_attribution_period(
         "market_effect": float(detail["market_effect"].sum()),
         "fx_effect": float(detail["fx_effect"].sum()),
         "residual_effect": float(detail["residual_effect"].sum()),
+        "investment_effect": float(detail["investment_effect"].sum()),
         "fund_fx_estimated": bool(detail["fund_fx_estimated"].any()),
     }
     return detail, daily, summary
