@@ -1093,294 +1093,318 @@ else:
 
     if not detail_attr.empty:
         detail_attr = functions.attach_income_effects(detail_attr, income_events)
-        daily_attr, attr = functions.summarize_attribution_detail(detail_attr)
+    daily_attr, attr = functions.summarize_attribution_detail(detail_attr)
+
+    if detail_attr.empty:
+        st.info("選択期間内に連続する分析可能なデータがありません。")
     else:
-        daily_attr, attr = functions.summarize_attribution_detail(detail_attr)
+        actual_start = attr["actual_start"]
+        actual_end = attr["actual_end"]
+        st.caption(
+            f"実データ範囲: {actual_start} → {actual_end}。"
+            " 日次スナップショットを積み上げて計算しています。"
+        )
 
-        if detail_attr.empty:
-            st.info("選択期間内に連続する2日分以上のV2データがありません。")
-        else:
-            actual_start = attr["actual_start"]
-            actual_end = attr["actual_end"]
+        col_total, col_flow, col_market, col_fx, col_residual = st.columns(5)
+        col_total.metric("総資産増減", f"{attr['total_change']:+,.0f} 円")
+        col_flow.metric("数量・資金/売買", f"{attr['flow_effect']:+,.0f} 円")
+        col_market.metric("市場要因", f"{attr['market_effect']:+,.0f} 円")
+        col_fx.metric("為替要因", f"{attr['fx_effect']:+,.0f} 円")
+        col_residual.metric("投信乖離/その他", f"{attr['residual_effect']:+,.0f} 円")
+
+        if attr.get("fund_fx_estimated"):
             st.caption(
-                f"実データ範囲: {actual_start} → {actual_end}。"
-                " 日次スナップショットを積み上げて計算しています。"
+                "円建て米国株投信は、S&P500系=VOO、楽天SCHD=SCHDを米国市場proxyとして、"
+                "USDJPYと組み合わせて市場・為替を推定分離しています。"
+                " 基準価額の評価時刻、信託報酬、配当・税、tracking差などは「投信乖離/その他」に残します。"
+                " 4要因はShapley分解で交差項を公平に配分し、合計は総資産増減と一致します。"
+            )
+        else:
+            st.caption(
+                "市場・為替・数量要因はShapley分解で、合計が総資産増減と一致します。"
+                " 投信proxy参照がない期間は従来方式で計算します。"
             )
 
-            col_total, col_flow, col_market, col_fx, col_residual = st.columns(5)
-            col_total.metric("総資産増減", f"{attr['total_change']:+,.0f} 円")
-            col_flow.metric("数量・資金/売買", f"{attr['flow_effect']:+,.0f} 円")
-            col_market.metric("市場要因", f"{attr['market_effect']:+,.0f} 円")
-            col_fx.metric("為替要因", f"{attr['fx_effect']:+,.0f} 円")
-            col_residual.metric("投信乖離/その他", f"{attr['residual_effect']:+,.0f} 円")
+        factor_df = pd.DataFrame({
+            "要因": ["数量・資金/売買", "市場", "為替", "投信乖離/その他"],
+            "寄与額": [
+                attr["flow_effect"], attr["market_effect"], attr["fx_effect"], attr["residual_effect"]
+            ],
+        })
+        fig_factor = px.bar(factor_df, x="要因", y="寄与額", title="期間中の要因別寄与額")
+        fig_factor.update_layout(xaxis_title="", yaxis_title="円", margin=dict(t=45, l=10, r=10, b=10))
+        st.plotly_chart(fig_factor, use_container_width=True, key="attribution_factors")
 
-            if attr.get("fund_fx_estimated"):
+        if len(daily_attr) > 1:
+            daily_plot = daily_attr.rename(columns={
+                "flow_effect": "数量・資金/売買",
+                "market_effect": "市場",
+                "fx_effect": "為替",
+                "residual_effect": "投信乖離/その他",
+            }).melt(
+                id_vars=["date"],
+                value_vars=["数量・資金/売買", "市場", "為替", "投信乖離/その他"],
+                var_name="要因",
+                value_name="寄与額",
+            )
+            fig_daily = px.bar(daily_plot, x="date", y="寄与額", color="要因", barmode="relative", title="日次の要因別寄与")
+            fig_daily.update_layout(xaxis_title="", yaxis_title="円", margin=dict(t=45, l=10, r=10, b=10))
+            st.plotly_chart(fig_daily, use_container_width=True, key="attribution_daily")
+
+        twr_daily, twr_summary = functions.calculate_estimated_twr(detail_attr)
+        gross_daily, gross_total_return = functions.calculate_estimated_total_return_twr(
+            detail_attr, "income_effect_gross"
+        )
+        net_daily, net_total_return = functions.calculate_estimated_total_return_twr(
+            detail_attr, "income_effect_after_tax"
+        )
+
+        st.subheader("📈 資金移動を除いた運用リターン")
+        if twr_summary["valid"] and gross_total_return["valid"] and net_total_return["valid"]:
+            price_col, gross_col, net_col, income_col = st.columns(4)
+            price_col.metric(
+                "推定TWR（価格・NAV＋為替）",
+                f"{twr_summary['twr']:+.2%}",
+            )
+            gross_col.metric(
+                "配当込み推定TWR（税前）",
+                f"{gross_total_return['twr']:+.2%}",
+            )
+            net_col.metric(
+                "配当込み推定TWR（税引後参考）",
+                f"{net_total_return['twr']:+.2%}",
+            )
+            gross_income = gross_total_return["income_effect"]
+            net_income = net_total_return["income_effect"]
+            income_col.metric(
+                "期間配当・分配金推計",
+                f"{gross_income:+,.0f} 円",
+                f"税引後参考 {net_income:+,.0f} 円",
+                delta_color="off",
+            )
+
+            if len(twr_daily) > 1:
+                return_plot = twr_daily[["end_date", "cumulative_twr"]].rename(
+                    columns={"cumulative_twr": "価格・NAV＋為替"}
+                )
+                return_plot["配当込み（税前）"] = gross_daily["cumulative_twr"]
+                return_plot["配当込み（税引後参考）"] = net_daily["cumulative_twr"]
+                return_plot = return_plot.melt(
+                    id_vars=["end_date"],
+                    var_name="リターン",
+                    value_name="累積値",
+                )
+                return_plot["累積TWR（%）"] = return_plot["累積値"] * 100
+                fig_twr = px.line(
+                    return_plot,
+                    x="end_date",
+                    y="累積TWR（%）",
+                    color="リターン",
+                    markers=True,
+                    title="資金移動を補正した累積運用リターン",
+                    labels={"end_date": "日付"},
+                )
+                fig_twr.update_layout(
+                    xaxis_title="",
+                    yaxis_title="%",
+                    margin=dict(t=45, l=10, r=10, b=10),
+                )
+                st.plotly_chart(
+                    fig_twr,
+                    use_container_width=True,
+                    key="attribution_twr_total_return",
+                )
+
+            if gross_income == 0:
                 st.caption(
-                    "円建て米国株投信は、S&P500系=VOO、楽天SCHD=SCHDを米国市場proxyとして、"
-                    "USDJPYと組み合わせて市場・為替を推定分離しています。"
-                    " 基準価額の評価時刻、信託報酬、配当・税、tracking差などは「投信乖離/その他」に残します。"
-                    " 4要因はShapley分解で交差項を公平に配分し、合計は総資産増減と一致します。"
+                    "選択期間内に配当・分配金イベントがないため、配当込みTWRと価格ベースTWRは同じです。"
                 )
             else:
                 st.caption(
-                    "市場・為替・数量要因はShapley分解で、合計が総資産増減と一致します。"
-                    " 投信proxy参照がない期間は従来方式で計算します。"
+                    "配当込みTWRは、株式・ETFの実際の配当イベントと、投資信託の実際の分配金履歴を"
+                    "保有数量へ掛けて推計しています。投信をETF配当で代用していません。"
                 )
 
-            factor_df = pd.DataFrame({
-                "要因": ["数量・資金/売買", "市場", "為替", "投信乖離/その他"],
-                "寄与額": [
-                    attr["flow_effect"], attr["market_effect"], attr["fx_effect"], attr["residual_effect"]
-                ],
+            st.caption(
+                "TWRは日次Modified Dietz近似です。入出金・売買の時刻を保存していないため、"
+                "フローは日中中間で発生したと仮定して日次リターンを複利連結しています。"
+                " 配当の権利確定日と売買が同日に重なる場合も、期首数量を使う推計です。"
+            )
+            st.caption(
+                "税前TWRは将来のベンチマーク比較用、税引後参考は口座種別・通貨・現在の税モデルを"
+                "適用した個人向け参考値です。実際の証券口座入金額とは数円〜数百円程度ずれる場合があります。"
+            )
+        else:
+            invalid_periods = max(
+                twr_summary.get("invalid_periods", 0),
+                gross_total_return.get("invalid_periods", 0),
+                net_total_return.get("invalid_periods", 0),
+            )
+            st.warning(
+                "選択期間では推定TWRを安全に計算できませんでした。"
+                f" 無効な日次区間: {invalid_periods}件"
+            )
+
+        asset_attr = functions.summarize_attribution(detail_attr, "asset_class")
+        security_detail = detail_attr[
+            detail_attr["ticker"].astype(str).str.upper().ne("CASH")
+        ].copy()
+        market_group_attr = functions.summarize_attribution(
+            security_detail, "market_group"
+        )
+        name_attr = functions.summarize_attribution(
+            security_detail, "display_name"
+        )
+        fx_attr = functions.summarize_attribution(
+            detail_attr, "fx_driver_currency"
+        )
+
+        def _format_attr_table(frame, label_column, label_name, limit=None):
+            view = frame.copy()
+            view[label_column] = view[label_column].replace("", "未分類")
+            view = view.rename(columns={
+                label_column: label_name,
+                "market_effect": "市場寄与",
+                "fx_effect": "為替寄与",
+                "residual_effect": "投信乖離/その他",
+                "investment_effect": "運用寄与",
+                "flow_effect": "数量・資金/売買",
+                "total_change": "総増減",
             })
-            fig_factor = px.bar(factor_df, x="要因", y="寄与額", title="期間中の要因別寄与額")
-            fig_factor.update_layout(xaxis_title="", yaxis_title="円", margin=dict(t=45, l=10, r=10, b=10))
-            st.plotly_chart(fig_factor, use_container_width=True, key="attribution_factors")
+            columns = [
+                label_name, "市場寄与", "為替寄与", "投信乖離/その他",
+                "運用寄与", "数量・資金/売買", "総増減"
+            ]
+            if limit is not None:
+                view = view.head(limit)
+            return view[columns]
 
-            if len(daily_attr) > 1:
-                daily_plot = daily_attr.rename(columns={
-                    "flow_effect": "数量・資金/売買",
-                    "market_effect": "市場",
-                    "fx_effect": "為替",
-                    "residual_effect": "投信乖離/その他",
-                }).melt(
-                    id_vars=["date"],
-                    value_vars=["数量・資金/売買", "市場", "為替", "投信乖離/その他"],
-                    var_name="要因",
-                    value_name="寄与額",
-                )
-                fig_daily = px.bar(daily_plot, x="date", y="寄与額", color="要因", barmode="relative", title="日次の要因別寄与")
-                fig_daily.update_layout(xaxis_title="", yaxis_title="円", margin=dict(t=45, l=10, r=10, b=10))
-                st.plotly_chart(fig_daily, use_container_width=True, key="attribution_daily")
+        market_positive = name_attr[name_attr["market_effect"] > 0].sort_values(
+            "market_effect", ascending=False
+        )
+        market_negative = name_attr[name_attr["market_effect"] < 0].sort_values(
+            "market_effect", ascending=True
+        )
+        group_impact = market_group_attr.reindex(
+            market_group_attr["market_effect"].abs()
+            .sort_values(ascending=False)
+            .index
+        )
 
-            twr_daily, twr_summary = functions.calculate_estimated_twr(detail_attr)
-            gross_daily, gross_total_return = functions.calculate_estimated_total_return_twr(
-                detail_attr, "income_effect_gross"
+        top_gain_name = (
+            str(market_positive.iloc[0]["display_name"])
+            if not market_positive.empty else "—"
+        )
+        top_gain_value = (
+            float(market_positive.iloc[0]["market_effect"])
+            if not market_positive.empty else 0.0
+        )
+        top_loss_name = (
+            str(market_negative.iloc[0]["display_name"])
+            if not market_negative.empty else "—"
+        )
+        top_loss_value = (
+            float(market_negative.iloc[0]["market_effect"])
+            if not market_negative.empty else 0.0
+        )
+        top_group_name = (
+            str(group_impact.iloc[0]["market_group"])
+            if not group_impact.empty else "—"
+        )
+        top_group_value = (
+            float(group_impact.iloc[0]["market_effect"])
+            if not group_impact.empty else 0.0
+        )
+
+        st.subheader("🧭 今回の勝因・敗因")
+        h1, h2, h3, h4 = st.columns(4)
+        h1.metric(
+            "運用要因（資金移動除外）",
+            f"{attr['investment_effect']:+,.0f} 円",
+        )
+        h2.metric(
+            "最大プラス市場寄与",
+            top_gain_name,
+            f"{top_gain_value:+,.0f} 円",
+        )
+        h3.metric(
+            "最大マイナス市場寄与",
+            top_loss_name,
+            f"{top_loss_value:+,.0f} 円",
+        )
+        h4.metric(
+            "最も影響した市場グループ",
+            top_group_name,
+            f"{top_group_value:+,.0f} 円",
+        )
+        st.caption(
+            "銘柄・市場グループ順位は市場要因だけで判定しています。"
+            " 為替による増減は別枠なので、円安・円高で順位が歪みません。"
+        )
+
+        st.subheader("🏅 銘柄別の市場寄与")
+        driver_chart = name_attr[
+            name_attr["market_effect"].abs() >= 1
+        ].copy()
+        if not driver_chart.empty:
+            driver_chart["abs_market_effect"] = driver_chart["market_effect"].abs()
+            driver_chart = (
+                driver_chart.nlargest(12, "abs_market_effect")
+                .sort_values("market_effect")
             )
-            net_daily, net_total_return = functions.calculate_estimated_total_return_twr(
-                detail_attr, "income_effect_after_tax"
+            fig_drivers = px.bar(
+                driver_chart,
+                x="market_effect",
+                y="display_name",
+                orientation="h",
+                title="株価・NAVの変動がポートフォリオへ与えた寄与（為替除外）",
+                labels={
+                    "market_effect": "市場寄与（円）",
+                    "display_name": "銘柄",
+                },
             )
-
-            st.subheader("📈 資金移動を除いた運用リターン")
-            if twr_summary["valid"] and gross_total_return["valid"] and net_total_return["valid"]:
-                price_col, gross_col, net_col, income_col = st.columns(4)
-                price_col.metric(
-                    "推定TWR（価格・NAV＋為替）",
-                    f"{twr_summary['twr']:+.2%}",
-                )
-                gross_col.metric(
-                    "配当込み推定TWR（税前）",
-                    f"{gross_total_return['twr']:+.2%}",
-                )
-                net_col.metric(
-                    "配当込み推定TWR（税引後参考）",
-                    f"{net_total_return['twr']:+.2%}",
-                )
-                gross_income = gross_total_return["income_effect"]
-                net_income = net_total_return["income_effect"]
-                income_col.metric(
-                    "期間配当・分配金推計",
-                    f"{gross_income:+,.0f} 円",
-                    f"税引後参考 {net_income:+,.0f} 円",
-                    delta_color="off",
-                )
-
-                if len(twr_daily) > 1:
-                    return_plot = twr_daily[["end_date", "cumulative_twr"]].rename(
-                        columns={"cumulative_twr": "価格・NAV＋為替"}
-                    )
-                    return_plot["配当込み（税前）"] = gross_daily["cumulative_twr"]
-                    return_plot["配当込み（税引後参考）"] = net_daily["cumulative_twr"]
-                    return_plot = return_plot.melt(
-                        id_vars=["end_date"],
-                        var_name="リターン",
-                        value_name="累積値",
-                    )
-                    return_plot["累積TWR（%）"] = return_plot["累積値"] * 100
-                    fig_twr = px.line(
-                        return_plot,
-                        x="end_date",
-                        y="累積TWR（%）",
-                        color="リターン",
-                        markers=True,
-                        title="資金移動を補正した累積運用リターン",
-                        labels={"end_date": "日付"},
-                    )
-                    fig_twr.update_layout(
-                        xaxis_title="",
-                        yaxis_title="%",
-                        margin=dict(t=45, l=10, r=10, b=10),
-                    )
-                    st.plotly_chart(
-                        fig_twr,
-                        use_container_width=True,
-                        key="attribution_twr_total_return",
-                    )
-
-                if gross_income == 0:
-                    st.caption(
-                        "選択期間内に配当・分配金イベントがないため、配当込みTWRと価格ベースTWRは同じです。"
-                    )
-                else:
-                    st.caption(
-                        "配当込みTWRは、株式・ETFの実際の配当イベントと、投資信託の実際の分配金履歴を"
-                        "保有数量へ掛けて推計しています。投信をETF配当で代用していません。"
-                    )
-
-                st.caption(
-                    "TWRは日次Modified Dietz近似です。入出金・売買の時刻を保存していないため、"
-                    "フローは日中中間で発生したと仮定して日次リターンを複利連結しています。"
-                    " 配当の権利確定日と売買が同日に重なる場合も、期首数量を使う推計です。"
-                )
-                st.caption(
-                    "税前TWRは将来のベンチマーク比較用、税引後参考は口座種別・通貨・現在の税モデルを"
-                    "適用した個人向け参考値です。実際の証券口座入金額とは数円〜数百円程度ずれる場合があります。"
-                )
-            else:
-                invalid_periods = max(
-                    twr_summary.get("invalid_periods", 0),
-                    gross_total_return.get("invalid_periods", 0),
-                    net_total_return.get("invalid_periods", 0),
-                )
-                st.warning(
-                    "選択期間では推定TWRを安全に計算できませんでした。"
-                    f" 無効な日次区間: {invalid_periods}件"
-                )
-
-            asset_attr = functions.summarize_attribution(detail_attr, "asset_class")
-            security_detail = detail_attr[
-                detail_attr["ticker"].astype(str).str.upper().ne("CASH")
-            ].copy()
-            market_group_attr = functions.summarize_attribution(
-                security_detail, "market_group"
+            fig_drivers.update_layout(
+                margin=dict(t=45, l=10, r=10, b=10),
+                yaxis_title="",
             )
-            name_attr = functions.summarize_attribution(
-                security_detail, "display_name"
+            st.plotly_chart(
+                fig_drivers,
+                use_container_width=True,
+                key="attribution_security_market_drivers",
             )
-            fx_attr = functions.summarize_attribution(
-                detail_attr, "fx_driver_currency"
-            )
+        else:
+            st.info("この期間は銘柄別の市場寄与がありません。")
 
-            def _format_attr_table(frame, label_column, label_name, limit=None):
-                view = frame.copy()
-                view[label_column] = view[label_column].replace("", "未分類")
-                view = view.rename(columns={
-                    label_column: label_name,
-                    "market_effect": "市場寄与",
-                    "fx_effect": "為替寄与",
-                    "residual_effect": "投信乖離/その他",
-                    "investment_effect": "運用寄与",
-                    "flow_effect": "数量・資金/売買",
-                    "total_change": "総増減",
-                })
-                columns = [
-                    label_name, "市場寄与", "為替寄与", "投信乖離/その他",
-                    "運用寄与", "数量・資金/売買", "総増減"
-                ]
-                if limit is not None:
-                    view = view.head(limit)
-                return view[columns]
+        st.subheader("📦 アセットクラス別の寄与")
+        st.dataframe(
+            _format_attr_table(
+                asset_attr, "asset_class", "アセットクラス"
+            ).style.format({
+                "市場寄与": "{:+,.0f}",
+                "為替寄与": "{:+,.0f}",
+                "投信乖離/その他": "{:+,.0f}",
+                "運用寄与": "{:+,.0f}",
+                "数量・資金/売買": "{:+,.0f}",
+                "総増減": "{:+,.0f}",
+            }),
+            use_container_width=True,
+            hide_index=True,
+        )
 
-            market_positive = name_attr[name_attr["market_effect"] > 0].sort_values(
-                "market_effect", ascending=False
-            )
-            market_negative = name_attr[name_attr["market_effect"] < 0].sort_values(
-                "market_effect", ascending=True
-            )
-            group_impact = market_group_attr.reindex(
+        col_group, col_fx = st.columns(2)
+        with col_group:
+            st.subheader("🏭 市場グループ別の寄与")
+            group_display = market_group_attr.reindex(
                 market_group_attr["market_effect"].abs()
                 .sort_values(ascending=False)
                 .index
             )
-
-            top_gain_name = (
-                str(market_positive.iloc[0]["display_name"])
-                if not market_positive.empty else "—"
-            )
-            top_gain_value = (
-                float(market_positive.iloc[0]["market_effect"])
-                if not market_positive.empty else 0.0
-            )
-            top_loss_name = (
-                str(market_negative.iloc[0]["display_name"])
-                if not market_negative.empty else "—"
-            )
-            top_loss_value = (
-                float(market_negative.iloc[0]["market_effect"])
-                if not market_negative.empty else 0.0
-            )
-            top_group_name = (
-                str(group_impact.iloc[0]["market_group"])
-                if not group_impact.empty else "—"
-            )
-            top_group_value = (
-                float(group_impact.iloc[0]["market_effect"])
-                if not group_impact.empty else 0.0
-            )
-
-            st.subheader("🧭 今回の勝因・敗因")
-            h1, h2, h3, h4 = st.columns(4)
-            h1.metric(
-                "運用要因（資金移動除外）",
-                f"{attr['investment_effect']:+,.0f} 円",
-            )
-            h2.metric(
-                "最大プラス市場寄与",
-                top_gain_name,
-                f"{top_gain_value:+,.0f} 円",
-            )
-            h3.metric(
-                "最大マイナス市場寄与",
-                top_loss_name,
-                f"{top_loss_value:+,.0f} 円",
-            )
-            h4.metric(
-                "最も影響した市場グループ",
-                top_group_name,
-                f"{top_group_value:+,.0f} 円",
-            )
-            st.caption(
-                "銘柄・市場グループ順位は市場要因だけで判定しています。"
-                " 為替による増減は別枠なので、円安・円高で順位が歪みません。"
-            )
-
-            st.subheader("🏅 銘柄別の市場寄与")
-            driver_chart = name_attr[
-                name_attr["market_effect"].abs() >= 1
-            ].copy()
-            if not driver_chart.empty:
-                driver_chart["abs_market_effect"] = driver_chart["market_effect"].abs()
-                driver_chart = (
-                    driver_chart.nlargest(12, "abs_market_effect")
-                    .sort_values("market_effect")
-                )
-                fig_drivers = px.bar(
-                    driver_chart,
-                    x="market_effect",
-                    y="display_name",
-                    orientation="h",
-                    title="株価・NAVの変動がポートフォリオへ与えた寄与（為替除外）",
-                    labels={
-                        "market_effect": "市場寄与（円）",
-                        "display_name": "銘柄",
-                    },
-                )
-                fig_drivers.update_layout(
-                    margin=dict(t=45, l=10, r=10, b=10),
-                    yaxis_title="",
-                )
-                st.plotly_chart(
-                    fig_drivers,
-                    use_container_width=True,
-                    key="attribution_security_market_drivers",
-                )
-            else:
-                st.info("この期間は銘柄別の市場寄与がありません。")
-
-            st.subheader("📦 アセットクラス別の寄与")
             st.dataframe(
                 _format_attr_table(
-                    asset_attr, "asset_class", "アセットクラス"
+                    group_display,
+                    "market_group",
+                    "市場グループ",
+                    limit=12,
                 ).style.format({
                     "市場寄与": "{:+,.0f}",
                     "為替寄与": "{:+,.0f}",
@@ -1392,83 +1416,57 @@ else:
                 use_container_width=True,
                 hide_index=True,
             )
+            st.caption(
+                "個別株はPositionsのsector、円建て米国株投信は「米国株投信」として集約しています。"
+            )
 
-            col_group, col_fx = st.columns(2)
-            with col_group:
-                st.subheader("🏭 市場グループ別の寄与")
-                group_display = market_group_attr.reindex(
-                    market_group_attr["market_effect"].abs()
-                    .sort_values(ascending=False)
-                    .index
-                )
-                st.dataframe(
-                    _format_attr_table(
-                        group_display,
-                        "market_group",
-                        "市場グループ",
-                        limit=12,
-                    ).style.format({
-                        "市場寄与": "{:+,.0f}",
-                        "為替寄与": "{:+,.0f}",
-                        "投信乖離/その他": "{:+,.0f}",
-                        "運用寄与": "{:+,.0f}",
-                        "数量・資金/売買": "{:+,.0f}",
-                        "総増減": "{:+,.0f}",
-                    }),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-                st.caption(
-                    "個別株はPositionsのsector、円建て米国株投信は「米国株投信」として集約しています。"
-                )
-
-            with col_fx:
-                st.subheader("💱 為替要因の内訳")
-                fx_display = fx_attr[
-                    fx_attr["fx_effect"].abs() >= 1
-                ].copy()
-                fx_display = fx_display.reindex(
-                    fx_display["fx_effect"].abs()
-                    .sort_values(ascending=False)
-                    .index
-                )
-                if fx_display.empty:
-                    st.info("この期間は有意な為替寄与がありません。")
-                else:
-                    fx_view = fx_display.rename(columns={
-                        "fx_driver_currency": "通貨",
-                        "fx_effect": "為替寄与",
-                    })[["通貨", "為替寄与"]]
-                    st.dataframe(
-                        fx_view.style.format({"為替寄与": "{:+,.0f}"}),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                st.caption(
-                    "円建て米国株投信の推定為替寄与はUSDに含めています。"
-                    " VND現金などはVNDとして表示します。"
-                )
-
-            st.subheader("📋 銘柄別の要因内訳")
-            name_display = name_attr.reindex(
-                name_attr["investment_effect"].abs()
+        with col_fx:
+            st.subheader("💱 為替要因の内訳")
+            fx_display = fx_attr[
+                fx_attr["fx_effect"].abs() >= 1
+            ].copy()
+            fx_display = fx_display.reindex(
+                fx_display["fx_effect"].abs()
                 .sort_values(ascending=False)
                 .index
             )
-            st.dataframe(
-                _format_attr_table(
-                    name_display, "display_name", "銘柄", limit=15
-                ).style.format({
-                    "市場寄与": "{:+,.0f}",
-                    "為替寄与": "{:+,.0f}",
-                    "投信乖離/その他": "{:+,.0f}",
-                    "運用寄与": "{:+,.0f}",
-                    "数量・資金/売買": "{:+,.0f}",
-                    "総増減": "{:+,.0f}",
-                }),
-                use_container_width=True,
-                hide_index=True,
+            if fx_display.empty:
+                st.info("この期間は有意な為替寄与がありません。")
+            else:
+                fx_view = fx_display.rename(columns={
+                    "fx_driver_currency": "通貨",
+                    "fx_effect": "為替寄与",
+                })[["通貨", "為替寄与"]]
+                st.dataframe(
+                    fx_view.style.format({"為替寄与": "{:+,.0f}"}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            st.caption(
+                "円建て米国株投信の推定為替寄与はUSDに含めています。"
+                " VND現金などはVNDとして表示します。"
             )
+
+        st.subheader("📋 銘柄別の要因内訳")
+        name_display = name_attr.reindex(
+            name_attr["investment_effect"].abs()
+            .sort_values(ascending=False)
+            .index
+        )
+        st.dataframe(
+            _format_attr_table(
+                name_display, "display_name", "銘柄", limit=15
+            ).style.format({
+                "市場寄与": "{:+,.0f}",
+                "為替寄与": "{:+,.0f}",
+                "投信乖離/その他": "{:+,.0f}",
+                "運用寄与": "{:+,.0f}",
+                "数量・資金/売買": "{:+,.0f}",
+                "総増減": "{:+,.0f}",
+            }),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 # --- (3) 資産額の表 ---
 st.subheader("📝 保有資産一覧")
