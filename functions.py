@@ -1131,6 +1131,278 @@ def summarize_attribution(detail, group_by):
     return result.sort_values("investment_effect", ascending=False).reset_index(drop=True)
 
 
+HISTORICAL_RECONSTRUCTION_START = pd.Timestamp("2026-04-12").date()
+HISTORICAL_RECONSTRUCTION_END = pd.Timestamp("2026-10-13").date()
+
+
+def _historical_currency(ticker, display_name):
+    ticker = str(ticker or "").strip().upper()
+    display = str(display_name or "").strip().upper()
+    if ticker == "CASH":
+        return display if display in {"JPY", "USD", "VND"} else "JPY"
+    if ticker.endswith(".T") or ticker.endswith("-JPY"):
+        return "JPY"
+    return "USD"
+
+
+def _split_normalized_close(history):
+    """Raw close normalized for stock splits but not dividends."""
+    if history is None or history.empty or "Close" not in history.columns:
+        return pd.Series(dtype=float)
+    close = pd.to_numeric(history["Close"], errors="coerce")
+    splits = pd.to_numeric(
+        history.get("Stock Splits", pd.Series(0.0, index=history.index)),
+        errors="coerce",
+    ).fillna(0.0)
+    split_multiplier = splits.where((splits > 0) & (splits != 1), 1.0)
+    # A split-date close is already post-split, so only later splits adjust it.
+    future_splits = split_multiplier.iloc[::-1].cumprod().iloc[::-1]
+    future_splits = future_splits.shift(-1, fill_value=1.0)
+    normalized = close / future_splits
+    normalized = normalized.dropna()
+    normalized.index = pd.to_datetime(normalized.index)
+    return normalized
+
+
+def _bulk_history_frame(downloaded, ticker, ticker_count):
+    if downloaded is None or downloaded.empty:
+        return pd.DataFrame()
+    if isinstance(downloaded.columns, pd.MultiIndex):
+        level0 = downloaded.columns.get_level_values(0)
+        if ticker in level0:
+            return downloaded[ticker].copy()
+        # Some yfinance versions return price field first and ticker second.
+        level1 = downloaded.columns.get_level_values(1)
+        if ticker in level1:
+            return downloaded.xs(ticker, axis=1, level=1).copy()
+        return pd.DataFrame()
+    if ticker_count == 1:
+        return downloaded.copy()
+    return pd.DataFrame()
+
+
+def build_historical_reference_data(
+    df_log, start_date=HISTORICAL_RECONSTRUCTION_START,
+    end_date=HISTORICAL_RECONSTRUCTION_END, min_rows=50,
+):
+    """Fetch price/FX references for high-confidence legacy Daily_Log dates."""
+    log = df_log.copy()
+    if log.empty:
+        return {}, []
+    log["date"] = pd.to_datetime(log["date"], errors="coerce").dt.date
+    log["ticker"] = log["ticker"].fillna("").astype(str).str.strip().str.upper()
+    log = log[log["date"].notna()].copy()
+    start_date = pd.Timestamp(start_date).date()
+    end_date = pd.Timestamp(end_date).date()
+    log = log[log["date"].between(start_date, end_date)].copy()
+    if log.empty:
+        return {}, []
+
+    row_counts = log.groupby("date").size()
+    valid_dates = sorted(row_counts[row_counts >= int(min_rows)].index.tolist())
+    if len(valid_dates) < 2:
+        return {}, []
+
+    excluded_labels = {"USSTOCK", "JPSTOCK", "EESTOCK", "CRYPTO"}
+    tickers = sorted({
+        ticker for ticker in log["ticker"].unique().tolist()
+        if ticker and ticker != "CASH" and ticker not in excluded_labels
+    })
+    warnings = []
+    references = {"prices": {}, "fx": {}, "valid_dates": valid_dates}
+
+    fetch_start = pd.Timestamp(valid_dates[0]) - pd.Timedelta(days=10)
+    fetch_end = pd.Timestamp(valid_dates[-1]) + pd.Timedelta(days=2)
+    if tickers:
+        try:
+            downloaded = yf.download(
+                tickers, start=fetch_start.date(), end=fetch_end.date(),
+                actions=True, auto_adjust=False, group_by="ticker",
+                progress=False, threads=True,
+            )
+        except Exception as error:
+            downloaded = None
+            warnings.append(f"過去価格一括取得失敗: {type(error).__name__}")
+
+        for ticker in tickers:
+            frame = _bulk_history_frame(downloaded, ticker, len(tickers))
+            series = _split_normalized_close(frame)
+            if series.empty:
+                warnings.append(f"{ticker}: 過去価格なし")
+                continue
+            for log_date in valid_dates:
+                candidates = series[series.index.date < log_date]
+                if not candidates.empty:
+                    references["prices"][(ticker, log_date)] = float(candidates.iloc[-1])
+
+    fx_symbols = {"USD": "JPY=X", "VND": "VNDJPY=X"}
+    try:
+        fx_download = yf.download(
+            list(fx_symbols.values()), start=fetch_start.date(), end=fetch_end.date(),
+            actions=False, auto_adjust=False, group_by="ticker",
+            progress=False, threads=True,
+        )
+    except Exception as error:
+        fx_download = None
+        warnings.append(f"過去為替一括取得失敗: {type(error).__name__}")
+
+    for currency, symbol in fx_symbols.items():
+        frame = _bulk_history_frame(fx_download, symbol, len(fx_symbols))
+        if frame.empty or "Close" not in frame.columns:
+            warnings.append(f"{currency}/JPY: 過去為替なし")
+            continue
+        series = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+        series.index = pd.to_datetime(series.index)
+        for log_date in valid_dates:
+            candidates = series[series.index.date <= log_date]
+            if not candidates.empty:
+                references["fx"][(currency, log_date)] = float(candidates.iloc[-1])
+
+    return references, list(dict.fromkeys(warnings))
+
+
+def _legacy_market_fx_effects(value_start, market_ratio, fx_ratio):
+    """Two-factor Shapley split of a held position value change."""
+    v0 = float(value_start)
+    market_delta = float(market_ratio) - 1.0
+    fx_delta = float(fx_ratio) - 1.0
+    market_effect = v0 * market_delta * (1.0 + 0.5 * fx_delta)
+    fx_effect = v0 * fx_delta * (1.0 + 0.5 * market_delta)
+    return market_effect, fx_effect
+
+
+def reconstruct_historical_attribution(
+    df_log, references, start_date=HISTORICAL_RECONSTRUCTION_START,
+    end_date=HISTORICAL_RECONSTRUCTION_END, min_rows=50,
+):
+    """Reconstruct legacy attribution from saved JPY values plus price/FX history.
+
+    Internal trades normally net out at portfolio level because stock purchases
+    were recorded together with the corresponding cash reduction. The remaining
+    net flow therefore approximates salary/bonus/dividend/other external cash.
+    """
+    log = df_log.copy()
+    if log.empty:
+        return pd.DataFrame(), {"valid_dates": [], "warnings": []}
+    log["date"] = pd.to_datetime(log["date"], errors="coerce").dt.date
+    log["ticker"] = log["ticker"].fillna("").astype(str).str.strip().str.upper()
+    log["display_name"] = log["display_name"].fillna("").astype(str).str.strip()
+    log["asset_class"] = log["asset_class"].fillna("").astype(str).str.strip()
+    log["sector"] = log["sector"].fillna("").astype(str).str.strip()
+    log["value_jpy"] = pd.to_numeric(
+        log["value_jpy"].astype(str).str.replace(",", "", regex=False),
+        errors="coerce",
+    ).fillna(0.0)
+    start_date = pd.Timestamp(start_date).date()
+    end_date = pd.Timestamp(end_date).date()
+    log = log[log["date"].between(start_date, end_date)].copy()
+
+    row_counts = log.groupby("date").size()
+    valid_dates = sorted(row_counts[row_counts >= int(min_rows)].index.tolist())
+    if references and references.get("valid_dates"):
+        valid_reference_dates = set(references["valid_dates"])
+        valid_dates = [d for d in valid_dates if d in valid_reference_dates]
+    if len(valid_dates) < 2:
+        return pd.DataFrame(), {"valid_dates": valid_dates, "warnings": []}
+
+    grouped = (
+        log[log["date"].isin(valid_dates)]
+        .groupby(
+            ["date", "ticker", "display_name", "asset_class", "sector"],
+            dropna=False, as_index=False,
+        )["value_jpy"].sum()
+    )
+
+    pieces = []
+    warnings = []
+    for d0, d1 in zip(valid_dates, valid_dates[1:]):
+        before = grouped[grouped["date"].eq(d0)]
+        after = grouped[grouped["date"].eq(d1)]
+        key_cols = ["ticker", "display_name", "asset_class", "sector"]
+        before_map = {tuple(row[col] for col in key_cols): row for _, row in before.iterrows()}
+        after_map = {tuple(row[col] for col in key_cols): row for _, row in after.iterrows()}
+        for key in sorted(set(before_map) | set(after_map), key=lambda x: tuple(map(str, x))):
+            row0 = before_map.get(key)
+            row1 = after_map.get(key)
+            meta = row1 if row1 is not None else row0
+            ticker = str(meta["ticker"]).upper()
+            display = str(meta["display_name"])
+            asset_class = str(meta["asset_class"])
+            sector = str(meta["sector"])
+            v0 = float(row0["value_jpy"]) if row0 is not None else 0.0
+            v1 = float(row1["value_jpy"]) if row1 is not None else 0.0
+            currency = _historical_currency(ticker, display)
+            market_effect = 0.0
+            fx_effect = 0.0
+            flow_effect = 0.0
+            residual_effect = 0.0
+            method = "historical_reconstructed"
+
+            if row0 is None:
+                flow_effect = v1
+            elif row1 is None:
+                flow_effect = -v0
+            else:
+                if ticker == "CASH":
+                    market_ratio = 1.0
+                    market_known = True
+                else:
+                    p0 = references.get("prices", {}).get((ticker, d0))
+                    p1 = references.get("prices", {}).get((ticker, d1))
+                    market_known = p0 is not None and p1 is not None and p0 > 0
+                    market_ratio = (p1 / p0) if market_known else 1.0
+
+                if currency == "JPY":
+                    fx_ratio = 1.0
+                    fx_known = True
+                else:
+                    f0 = references.get("fx", {}).get((currency, d0))
+                    f1 = references.get("fx", {}).get((currency, d1))
+                    fx_known = f0 is not None and f1 is not None and f0 > 0
+                    fx_ratio = (f1 / f0) if fx_known else 1.0
+
+                if market_known and fx_known:
+                    market_effect, fx_effect = _legacy_market_fx_effects(
+                        v0, market_ratio, fx_ratio
+                    )
+                    flow_effect = v1 - v0 - market_effect - fx_effect
+                else:
+                    method = "historical_reconstructed_partial"
+                    if fx_known:
+                        fx_effect = v0 * (fx_ratio - 1.0)
+                    residual_effect = v1 - v0 - fx_effect
+                    warnings.append(f"{d0}→{d1} {ticker}: 市場参照不足")
+
+            market_group = (
+                "現金" if ticker == "CASH" else sector or asset_class or "未分類"
+            )
+            record = {
+                "start_date": d0, "end_date": d1,
+                "owner": "", "account_type": "", "ticker": ticker,
+                "display_name": display, "asset_class": asset_class,
+                "sector": sector, "currency": currency, "instrument_type": "",
+                "fund_code": "", "product_name": "", "price_unit": 1.0,
+                "purpose": "", "role": "",
+                "value_start": v0, "value_end": v1, "total_change": v1 - v0,
+                "flow_effect": flow_effect, "market_effect": market_effect,
+                "fx_effect": fx_effect, "residual_effect": residual_effect,
+                "fund_fx_estimated": False, "attribution_method": method,
+                "market_group": market_group,
+                "fx_driver_currency": currency,
+            }
+            record["market_fx_effect"] = market_effect + fx_effect
+            record["investment_effect"] = market_effect + fx_effect + residual_effect
+            pieces.append(record)
+
+    detail = pd.DataFrame(pieces)
+    return detail, {
+        "valid_dates": valid_dates,
+        "warnings": list(dict.fromkeys(warnings)),
+        "start": valid_dates[0] if valid_dates else None,
+        "end": valid_dates[-1] if valid_dates else None,
+        "method": "historical_reconstructed",
+    }
+
 def _shapley_dividend_capacity_effects(
     q0, d0, f0, q1, d1, f1, price_unit
 ):
