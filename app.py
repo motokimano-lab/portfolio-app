@@ -1183,98 +1183,218 @@ else:
             fig_daily.update_layout(xaxis_title="", yaxis_title="円", margin=dict(t=45, l=10, r=10, b=10))
             st.plotly_chart(fig_daily, use_container_width=True, key="attribution_daily")
 
-        twr_daily, twr_summary = functions.calculate_estimated_twr(detail_attr)
-        gross_daily, gross_total_return = functions.calculate_estimated_total_return_twr(
-            detail_attr, "income_effect_gross"
-        )
-        net_daily, net_total_return = functions.calculate_estimated_total_return_twr(
-            detail_attr, "income_effect_after_tax"
-        )
-
         st.subheader("📈 資金移動を除いた運用リターン")
-        if twr_summary["valid"] and gross_total_return["valid"] and net_total_return["valid"]:
-            price_col, gross_col, net_col, income_col = st.columns(4)
-            price_col.metric(
-                "推定TWR（価格・NAV＋為替）",
-                f"{twr_summary['twr']:+.2%}",
-            )
-            gross_col.metric(
-                "配当込み推定TWR（税前）",
-                f"{gross_total_return['twr']:+.2%}",
-            )
-            net_col.metric(
-                "配当込み推定TWR（税引後参考）",
-                f"{net_total_return['twr']:+.2%}",
-            )
-            gross_income = gross_total_return["income_effect"]
-            net_income = net_total_return["income_effect"]
-            income_col.metric(
-                "期間配当・分配金推計",
-                f"{gross_income:+,.0f} 円",
-                f"税引後参考 {net_income:+,.0f} 円",
-                delta_color="off",
-            )
 
-            if len(twr_daily) > 1:
-                return_plot = twr_daily[["end_date", "cumulative_twr"]].rename(
-                    columns={"cumulative_twr": "価格・NAV＋為替"}
-                )
-                return_plot["配当込み（税前）"] = gross_daily["cumulative_twr"]
-                return_plot["配当込み（税引後参考）"] = net_daily["cumulative_twr"]
-                return_plot = return_plot.melt(
-                    id_vars=["end_date"],
-                    var_name="リターン",
-                    value_name="累積値",
-                )
-                return_plot["累積TWR（%）"] = return_plot["累積値"] * 100
-                fig_twr = px.line(
-                    return_plot,
-                    x="end_date",
-                    y="累積TWR（%）",
-                    color="リターン",
-                    markers=True,
-                    title="資金移動を補正した累積運用リターン",
-                    labels={"end_date": "日付"},
-                )
-                fig_twr.update_layout(
-                    xaxis_title="",
-                    yaxis_title="%",
-                    margin=dict(t=45, l=10, r=10, b=10),
-                )
-                st.plotly_chart(
-                    fig_twr,
-                    use_container_width=True,
-                    key="attribution_twr_total_return",
-                )
-
-            if gross_income == 0:
-                st.caption(
-                    "選択期間内に配当・分配金イベントがないため、配当込みTWRと価格ベースTWRは同じです。"
-                )
-            else:
-                st.caption(
-                    "配当込みTWRは、株式・ETFの実際の配当イベントと、投資信託の実際の分配金履歴を"
-                    "保有数量へ掛けて推計しています。投信をETF配当で代用していません。"
-                )
-
-            st.caption(
-                "TWRは日次Modified Dietz近似です。入出金・売買の時刻を保存していないため、"
-                "フローは日中中間で発生したと仮定して日次リターンを複利連結しています。"
-                " 配当の権利確定日と売買が同日に重なる場合も、期首数量を使う推計です。"
-            )
-            st.caption(
-                "税前TWRは将来のベンチマーク比較用、税引後参考は口座種別・通貨・現在の税モデルを"
-                "適用した個人向け参考値です。実際の証券口座入金額とは数円〜数百円程度ずれる場合があります。"
+        if has_history_bridge:
+            st.warning(
+                "履歴切替区間を含むため、この期間のTWRは表示しません。"
+                " 2026/10/13以前か2026/10/15以降のどちらかに期間を限定すると計算できます。"
             )
         else:
-            invalid_periods = max(
-                twr_summary.get("invalid_periods", 0),
-                gross_total_return.get("invalid_periods", 0),
-                net_total_return.get("invalid_periods", 0),
+            twr_daily, twr_summary = functions.calculate_estimated_twr(detail_attr)
+
+            if has_reconstructed_history:
+                if twr_summary["valid"]:
+                    twr_col, pnl_col = st.columns(2)
+                    twr_col.metric(
+                        "推定TWR（価格＋為替）",
+                        f"{twr_summary['twr']:+.2%}",
+                    )
+                    pnl_col.metric(
+                        "運用損益（価格＋為替）",
+                        f"{twr_summary['investment_effect']:+,.0f} 円",
+                    )
+                    if len(twr_daily) > 1:
+                        twr_plot = twr_daily.copy()
+                        twr_plot["累積TWR（%）"] = twr_plot["cumulative_twr"] * 100
+                        fig_twr = px.line(
+                            twr_plot,
+                            x="end_date",
+                            y="累積TWR（%）",
+                            markers=True,
+                            title="旧Daily_Log再構成による累積運用リターン",
+                        )
+                        fig_twr.update_layout(
+                            xaxis_title="",
+                            yaxis_title="%",
+                            margin=dict(t=45, l=10, r=10, b=10),
+                        )
+                        st.plotly_chart(
+                            fig_twr,
+                            use_container_width=True,
+                            key="historical_reconstructed_twr",
+                        )
+                    st.caption(
+                        "旧Daily_Log期間のTWRは、保存済み評価額と当時の価格・為替から再構成した推定値です。"
+                        " 当時の口座別数量・配当受取額は保存されていないため、配当込みTotal Returnは表示しません。"
+                    )
+                else:
+                    st.warning("旧履歴の推定TWRを安全に計算できませんでした。")
+            else:
+                gross_daily, gross_total_return = functions.calculate_estimated_total_return_twr(
+                    detail_attr, "income_effect_gross"
+                )
+                net_daily, net_total_return = functions.calculate_estimated_total_return_twr(
+                    detail_attr, "income_effect_after_tax"
+                )
+
+                if (
+                    twr_summary["valid"]
+                    and gross_total_return["valid"]
+                    and net_total_return["valid"]
+                ):
+                    price_col, gross_col, net_col, income_col = st.columns(4)
+                    price_col.metric(
+                        "推定TWR（価格・NAV＋為替）",
+                        f"{twr_summary['twr']:+.2%}",
+                    )
+                    gross_col.metric(
+                        "配当込み推定TWR（税前）",
+                        f"{gross_total_return['twr']:+.2%}",
+                    )
+                    net_col.metric(
+                        "配当込み推定TWR（税引後参考）",
+                        f"{net_total_return['twr']:+.2%}",
+                    )
+                    gross_income = gross_total_return["income_effect"]
+                    net_income = net_total_return["income_effect"]
+                    income_col.metric(
+                        "期間配当・分配金推計",
+                        f"{gross_income:+,.0f} 円",
+                        f"税引後参考 {net_income:+,.0f} 円",
+                        delta_color="off",
+                    )
+
+                    if len(twr_daily) > 1:
+                        return_plot = twr_daily[
+                            ["end_date", "cumulative_twr"]
+                        ].rename(columns={"cumulative_twr": "価格・NAV＋為替"})
+                        return_plot["配当込み（税前）"] = gross_daily["cumulative_twr"]
+                        return_plot["配当込み（税引後参考）"] = net_daily["cumulative_twr"]
+                        return_plot = return_plot.melt(
+                            id_vars=["end_date"],
+                            var_name="リターン",
+                            value_name="累積値",
+                        )
+                        return_plot["累積TWR（%）"] = return_plot["累積値"] * 100
+                        fig_twr = px.line(
+                            return_plot,
+                            x="end_date",
+                            y="累積TWR（%）",
+                            color="リターン",
+                            markers=True,
+                            title="資金移動を補正した累積運用リターン",
+                        )
+                        fig_twr.update_layout(
+                            xaxis_title="",
+                            yaxis_title="%",
+                            margin=dict(t=45, l=10, r=10, b=10),
+                        )
+                        st.plotly_chart(
+                            fig_twr,
+                            use_container_width=True,
+                            key="attribution_twr_total_return",
+                        )
+
+                    st.caption(
+                        "日次Modified Dietz近似で資金移動を補正しています。"
+                        " 配当込みTWRは実際の配当・分配金イベントを使った推計です。"
+                    )
+                else:
+                    invalid_periods = max(
+                        twr_summary.get("invalid_periods", 0),
+                        gross_total_return.get("invalid_periods", 0),
+                        net_total_return.get("invalid_periods", 0),
+                    )
+                    st.warning(
+                        "選択期間では推定TWRを安全に計算できませんでした。"
+                        f" 無効な日次区間: {invalid_periods}件"
+                    )
+
+        dividend_detail, dividend_summary = functions.analyze_dividend_capacity_period(
+            df_log_v2, selected_start, selected_end, after_tax=True
+        )
+        st.subheader("💵 年間配当能力の増減要因")
+        if dividend_detail.empty:
+            st.info(
+                "配当要因分析は、配当予想を保存したV2スナップショットが2日分そろうと開始します。"
+                " 既存の10/15・10/16分は旧形式のため、この分析だけは新規保存分からです。"
             )
-            st.warning(
-                "選択期間では推定TWRを安全に計算できませんでした。"
-                f" 無効な日次区間: {invalid_periods}件"
+        else:
+            d1, d2, d3, d4 = st.columns(4)
+            d1.metric(
+                "年間手取り配当能力",
+                f"{dividend_summary['total_end']:,.0f} 円",
+                f"{dividend_summary['total_change']:+,.0f} 円",
+            )
+            d2.metric(
+                "買い増し・売却要因",
+                f"{dividend_summary['quantity_effect']:+,.0f} 円/年",
+            )
+            d3.metric(
+                "増減配要因（run-rate推計）",
+                f"{dividend_summary['dividend_effect']:+,.0f} 円/年",
+            )
+            d4.metric(
+                "為替要因",
+                f"{dividend_summary['fx_effect']:+,.0f} 円/年",
+            )
+
+            dividend_factor = pd.DataFrame({
+                "要因": ["買い増し・売却", "1株/1万口配当変化", "為替"],
+                "年間配当への寄与": [
+                    dividend_summary["quantity_effect"],
+                    dividend_summary["dividend_effect"],
+                    dividend_summary["fx_effect"],
+                ],
+            })
+            fig_dividend_factor = px.bar(
+                dividend_factor,
+                x="要因",
+                y="年間配当への寄与",
+                title="年間手取り配当能力の増減要因",
+            )
+            fig_dividend_factor.update_layout(
+                xaxis_title="",
+                yaxis_title="円/年",
+                margin=dict(t=45, l=10, r=10, b=10),
+            )
+            st.plotly_chart(
+                fig_dividend_factor,
+                use_container_width=True,
+                key="dividend_capacity_attribution",
+            )
+
+            dividend_rank = dividend_detail.copy()
+            dividend_rank["abs_change"] = dividend_rank["total_change"].abs()
+            dividend_rank = dividend_rank.nlargest(12, "abs_change")
+            dividend_rank = dividend_rank.rename(columns={
+                "display_name": "銘柄",
+                "capacity_start": "開始時年間配当",
+                "capacity_end": "終了時年間配当",
+                "total_change": "年間配当増減",
+                "quantity_effect": "買い増し・売却",
+                "dividend_effect": "増減配推計",
+                "fx_effect": "為替",
+            })
+            st.dataframe(
+                dividend_rank[[
+                    "銘柄", "開始時年間配当", "終了時年間配当",
+                    "年間配当増減", "買い増し・売却", "増減配推計", "為替",
+                ]].style.format({
+                    "開始時年間配当": "{:,.0f}",
+                    "終了時年間配当": "{:,.0f}",
+                    "年間配当増減": "{:+,.0f}",
+                    "買い増し・売却": "{:+,.0f}",
+                    "増減配推計": "{:+,.0f}",
+                    "為替": "{:+,.0f}",
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.caption(
+                "増減配要因は現在のPhase 1予想（直近配当×支払頻度）の変化です。"
+                " 企業公式の通期配当予想そのものではありません。"
             )
 
         asset_attr = functions.summarize_attribution(detail_attr, "asset_class")
