@@ -56,8 +56,18 @@ vnd_jpy, vnd_error = get_fx("VNDJPY=X", 0.006)
 df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
 tickers = df["ticker"].unique()
 
-asset_data, fund_status = get_position_assets_data(df)
-price_dict, div_dict, perf_dict, errors = asset_data
+asset_data, fund_status = get_position_assets_data(
+    df, include_dividend_details=True
+)
+(
+    price_dict,
+    div_dict,
+    perf_dict,
+    errors,
+    ttm_dividend_dict,
+    forecast_dividend_dict,
+    forecast_source_dict,
+) = asset_data
 stale_funds = []
 for ticker, record in fund_status.items():
     if not record["success"]:
@@ -73,10 +83,22 @@ for ticker, record in fund_status.items():
 price_dict["CASH"] = 1.0
 div_dict["CASH"] = 0.0
 perf_dict["CASH"] = (0.0, 0.0)
+ttm_dividend_dict["CASH"] = 0.0
+forecast_dividend_dict["CASH"] = 0.0
+forecast_source_dict["CASH"] = "配当なし"
 
 # --- ④ マッピング
 df["price"] = df["ticker"].map(lambda x: price_dict.get(x))
 df["div_yield"] = df["ticker"].map(lambda x: div_dict.get(x, 0))
+df["dividend_ttm_per_share"] = df["ticker"].map(
+    lambda x: ttm_dividend_dict.get(x, 0.0)
+)
+df["dividend_forecast_per_share"] = df["ticker"].map(
+    lambda x: forecast_dividend_dict.get(x, 0.0)
+)
+df["dividend_forecast_source"] = df["ticker"].map(
+    lambda x: forecast_source_dict.get(x, "未取得")
+)
 df["day_diff_val"] = df["ticker"].map(lambda x: perf_dict.get(x, (0,0))[0])
 df["day_diff_pct"] = df["ticker"].map(lambda x: perf_dict.get(x, (0,0))[1])
 
