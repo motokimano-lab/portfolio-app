@@ -1074,8 +1074,18 @@ else:
                 st.plotly_chart(fig_daily, use_container_width=True, key="attribution_daily")
 
             asset_attr = functions.summarize_attribution(detail_attr, "asset_class")
-            sector_attr = functions.summarize_attribution(detail_attr, "sector")
-            name_attr = functions.summarize_attribution(detail_attr, "display_name")
+            security_detail = detail_attr[
+                detail_attr["ticker"].astype(str).str.upper().ne("CASH")
+            ].copy()
+            market_group_attr = functions.summarize_attribution(
+                security_detail, "market_group"
+            )
+            name_attr = functions.summarize_attribution(
+                security_detail, "display_name"
+            )
+            fx_attr = functions.summarize_attribution(
+                detail_attr, "fx_driver_currency"
+            )
 
             def _format_attr_table(frame, label_column, label_name, limit=None):
                 view = frame.copy()
@@ -1089,51 +1099,202 @@ else:
                     "flow_effect": "数量・資金/売買",
                     "total_change": "総増減",
                 })
-                columns = [label_name, "市場寄与", "為替寄与", "投信乖離/その他", "運用寄与", "数量・資金/売買", "総増減"]
+                columns = [
+                    label_name, "市場寄与", "為替寄与", "投信乖離/その他",
+                    "運用寄与", "数量・資金/売買", "総増減"
+                ]
                 if limit is not None:
                     view = view.head(limit)
                 return view[columns]
 
+            market_positive = name_attr[name_attr["market_effect"] > 0].sort_values(
+                "market_effect", ascending=False
+            )
+            market_negative = name_attr[name_attr["market_effect"] < 0].sort_values(
+                "market_effect", ascending=True
+            )
+            group_impact = market_group_attr.reindex(
+                market_group_attr["market_effect"].abs()
+                .sort_values(ascending=False)
+                .index
+            )
+
+            top_gain_name = (
+                str(market_positive.iloc[0]["display_name"])
+                if not market_positive.empty else "—"
+            )
+            top_gain_value = (
+                float(market_positive.iloc[0]["market_effect"])
+                if not market_positive.empty else 0.0
+            )
+            top_loss_name = (
+                str(market_negative.iloc[0]["display_name"])
+                if not market_negative.empty else "—"
+            )
+            top_loss_value = (
+                float(market_negative.iloc[0]["market_effect"])
+                if not market_negative.empty else 0.0
+            )
+            top_group_name = (
+                str(group_impact.iloc[0]["market_group"])
+                if not group_impact.empty else "—"
+            )
+            top_group_value = (
+                float(group_impact.iloc[0]["market_effect"])
+                if not group_impact.empty else 0.0
+            )
+
+            st.subheader("🧭 今回の勝因・敗因")
+            h1, h2, h3, h4 = st.columns(4)
+            h1.metric(
+                "運用要因（資金移動除外）",
+                f"{attr['investment_effect']:+,.0f} 円",
+            )
+            h2.metric(
+                "最大プラス市場寄与",
+                top_gain_name,
+                f"{top_gain_value:+,.0f} 円",
+            )
+            h3.metric(
+                "最大マイナス市場寄与",
+                top_loss_name,
+                f"{top_loss_value:+,.0f} 円",
+            )
+            h4.metric(
+                "最も影響した市場グループ",
+                top_group_name,
+                f"{top_group_value:+,.0f} 円",
+            )
+            st.caption(
+                "銘柄・市場グループ順位は市場要因だけで判定しています。"
+                " 為替による増減は別枠なので、円安・円高で順位が歪みません。"
+            )
+
+            st.subheader("🏅 銘柄別の市場寄与")
+            driver_chart = name_attr[
+                name_attr["market_effect"].abs() >= 1
+            ].copy()
+            if not driver_chart.empty:
+                driver_chart["abs_market_effect"] = driver_chart["market_effect"].abs()
+                driver_chart = (
+                    driver_chart.nlargest(12, "abs_market_effect")
+                    .sort_values("market_effect")
+                )
+                fig_drivers = px.bar(
+                    driver_chart,
+                    x="market_effect",
+                    y="display_name",
+                    orientation="h",
+                    title="株価・NAVの変動がポートフォリオへ与えた寄与（為替除外）",
+                    labels={
+                        "market_effect": "市場寄与（円）",
+                        "display_name": "銘柄",
+                    },
+                )
+                fig_drivers.update_layout(
+                    margin=dict(t=45, l=10, r=10, b=10),
+                    yaxis_title="",
+                )
+                st.plotly_chart(
+                    fig_drivers,
+                    use_container_width=True,
+                    key="attribution_security_market_drivers",
+                )
+            else:
+                st.info("この期間は銘柄別の市場寄与がありません。")
+
             st.subheader("📦 アセットクラス別の寄与")
             st.dataframe(
-                _format_attr_table(asset_attr, "asset_class", "アセットクラス").style.format({
-                    "市場寄与": "{:+,.0f}", "為替寄与": "{:+,.0f}",
-                    "投信乖離/その他": "{:+,.0f}", "運用寄与": "{:+,.0f}",
-                    "数量・資金/売買": "{:+,.0f}", "総増減": "{:+,.0f}",
+                _format_attr_table(
+                    asset_attr, "asset_class", "アセットクラス"
+                ).style.format({
+                    "市場寄与": "{:+,.0f}",
+                    "為替寄与": "{:+,.0f}",
+                    "投信乖離/その他": "{:+,.0f}",
+                    "運用寄与": "{:+,.0f}",
+                    "数量・資金/売買": "{:+,.0f}",
+                    "総増減": "{:+,.0f}",
                 }),
                 use_container_width=True,
                 hide_index=True,
             )
 
-            col_sector, col_name = st.columns(2)
-            with col_sector:
-                st.subheader("🏭 セクター寄与 TOP")
-                sector_display = sector_attr.reindex(
-                    sector_attr["investment_effect"].abs().sort_values(ascending=False).index
+            col_group, col_fx = st.columns(2)
+            with col_group:
+                st.subheader("🏭 市場グループ別の寄与")
+                group_display = market_group_attr.reindex(
+                    market_group_attr["market_effect"].abs()
+                    .sort_values(ascending=False)
+                    .index
                 )
                 st.dataframe(
-                    _format_attr_table(sector_display, "sector", "セクター", limit=10).style.format({
-                        "市場・NAV寄与": "{:+,.0f}", "為替寄与": "{:+,.0f}",
-                        "市場+為替寄与": "{:+,.0f}", "数量・資金/売買": "{:+,.0f}", "総増減": "{:+,.0f}",
+                    _format_attr_table(
+                        group_display,
+                        "market_group",
+                        "市場グループ",
+                        limit=12,
+                    ).style.format({
+                        "市場寄与": "{:+,.0f}",
+                        "為替寄与": "{:+,.0f}",
+                        "投信乖離/その他": "{:+,.0f}",
+                        "運用寄与": "{:+,.0f}",
+                        "数量・資金/売買": "{:+,.0f}",
+                        "総増減": "{:+,.0f}",
                     }),
                     use_container_width=True,
                     hide_index=True,
                 )
-
-            with col_name:
-                st.subheader("🏅 銘柄寄与 TOP")
-                name_display = name_attr.reindex(
-                    name_attr["investment_effect"].abs().sort_values(ascending=False).index
-                )
-                st.dataframe(
-                    _format_attr_table(name_display, "display_name", "銘柄", limit=10).style.format({
-                        "市場・NAV寄与": "{:+,.0f}", "為替寄与": "{:+,.0f}",
-                        "市場+為替寄与": "{:+,.0f}", "数量・資金/売買": "{:+,.0f}", "総増減": "{:+,.0f}",
-                    }),
-                    use_container_width=True,
-                    hide_index=True,
+                st.caption(
+                    "個別株はPositionsのsector、円建て米国株投信は「米国株投信」として集約しています。"
                 )
 
+            with col_fx:
+                st.subheader("💱 為替要因の内訳")
+                fx_display = fx_attr[
+                    fx_attr["fx_effect"].abs() >= 1
+                ].copy()
+                fx_display = fx_display.reindex(
+                    fx_display["fx_effect"].abs()
+                    .sort_values(ascending=False)
+                    .index
+                )
+                if fx_display.empty:
+                    st.info("この期間は有意な為替寄与がありません。")
+                else:
+                    fx_view = fx_display.rename(columns={
+                        "fx_driver_currency": "通貨",
+                        "fx_effect": "為替寄与",
+                    })[["通貨", "為替寄与"]]
+                    st.dataframe(
+                        fx_view.style.format({"為替寄与": "{:+,.0f}"}),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                st.caption(
+                    "円建て米国株投信の推定為替寄与はUSDに含めています。"
+                    " VND現金などはVNDとして表示します。"
+                )
+
+            st.subheader("📋 銘柄別の要因内訳")
+            name_display = name_attr.reindex(
+                name_attr["investment_effect"].abs()
+                .sort_values(ascending=False)
+                .index
+            )
+            st.dataframe(
+                _format_attr_table(
+                    name_display, "display_name", "銘柄", limit=15
+                ).style.format({
+                    "市場寄与": "{:+,.0f}",
+                    "為替寄与": "{:+,.0f}",
+                    "投信乖離/その他": "{:+,.0f}",
+                    "運用寄与": "{:+,.0f}",
+                    "数量・資金/売買": "{:+,.0f}",
+                    "総増減": "{:+,.0f}",
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
 
 # --- (3) 資産額の表 ---
 st.subheader("📝 保有資産一覧")
