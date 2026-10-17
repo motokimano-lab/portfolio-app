@@ -1271,8 +1271,11 @@ def build_rebalance_diagnostics(
 
     # Group TWR uses the same daily flow-adjusted engine as the portfolio.
     twr_rows = []
-    for keys, group in work.groupby(group_columns, dropna=False):
+    twr_grouper = group_columns[0] if len(group_columns) == 1 else group_columns
+    for keys, group in work.groupby(twr_grouper, dropna=False):
         if len(group_columns) == 1:
+            keys = (keys,)
+        elif not isinstance(keys, tuple):
             keys = (keys,)
         _, twr_summary = calculate_estimated_twr(group)
         twr_rows.append({
