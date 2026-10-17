@@ -11,7 +11,8 @@ from functions import (
     analyze_attribution_period, summarize_attribution, calculate_estimated_twr,
     attach_income_effects, calculate_estimated_total_return_twr,
     analyze_dividend_capacity_period, reconstruct_historical_attribution,
-    summarize_attribution_detail, build_history_gap_row
+    summarize_attribution_detail, build_history_gap_row,
+    build_rebalance_diagnostics
 )
 
 
@@ -229,10 +230,12 @@ class TaxAndMigrationTests(unittest.TestCase):
         self.assertAlmostEqual(new.fx_effect,0)
         self.assertAlmostEqual(summary['total_change'],0,places=6)
 
-    def test_us_fund_attribution_separates_proxy_fx_and_residual(self):
+    def test_us_fund_attribution_splits_nav_into_fund_return_and_fx(self):
         columns=DAILY_LOG_V2_HEADERS[:23]
         nav0=10000.0
-        nav1=nav0 * 1.02 * 1.01 * 0.999
+        fund_own_ratio=1.02
+        fx_ratio=1.01
+        nav1=nav0 * fund_own_ratio * fx_ratio
         rows=[
             ['2026-10-15','x','元気','NISA','MF:03311187','SP500','米国株','',
              'JPY','mutual_fund','03311187','eMAXIS Slim',10000,10000,nav0,1,
@@ -242,8 +245,8 @@ class TaxAndMigrationTests(unittest.TestCase):
              nav1,nav1,'成長','',0,'2026-10-15','VOO'],
         ]
         references={
-            ('VOO','2026-10-14'):{'proxy_price':100.0,'usd_jpy':150.0},
-            ('VOO','2026-10-15'):{'proxy_price':102.0,'usd_jpy':151.5},
+            '2026-10-14': {'usd_jpy':150.0},
+            '2026-10-15': {'usd_jpy':151.5},
         }
         detail,_,summary=analyze_attribution_period(
             pd.DataFrame(rows,columns=columns),
@@ -251,29 +254,23 @@ class TaxAndMigrationTests(unittest.TestCase):
         )
         item=detail.iloc[0]
         self.assertTrue(item.fund_fx_estimated)
-        self.assertEqual(item.attribution_method,'fund_proxy_estimate')
+        self.assertEqual(item.attribution_method,'fund_nav_fx_split')
         self.assertEqual(item.market_group,'米国株投信')
         self.assertEqual(item.fx_driver_currency,'USD')
         self.assertGreater(item.market_effect,0)
         self.assertGreater(item.fx_effect,0)
-        self.assertLess(item.residual_effect,0)
+        self.assertAlmostEqual(item.residual_effect,0)
         self.assertAlmostEqual(
-            item.flow_effect+item.market_effect+item.fx_effect+item.residual_effect,
+            item.flow_effect+item.market_effect+item.fx_effect,
             item.total_change,
             places=8,
         )
         self.assertAlmostEqual(
-            summary['flow_effect']+summary['market_effect']+
-            summary['fx_effect']+summary['residual_effect'],
+            summary['flow_effect']+summary['market_effect']+summary['fx_effect'],
             summary['total_change'],
             places=8,
         )
         self.assertTrue(summary['fund_fx_estimated'])
-        self.assertAlmostEqual(
-            summary['investment_effect'],
-            summary['market_effect']+summary['fx_effect']+summary['residual_effect'],
-            places=8,
-        )
 
     def test_us_fund_without_reference_falls_back_safely(self):
         columns=DAILY_LOG_V2_HEADERS[:23]
@@ -316,6 +313,54 @@ class TaxAndMigrationTests(unittest.TestCase):
             summary['total_change'],
             places=6,
         )
+
+    def test_rebalance_diagnostics_tracks_weight_drift_and_context(self):
+        detail = pd.DataFrame([
+            dict(
+                start_date=date(2026,10,15), end_date=date(2026,10,16),
+                ticker='AAA', display_name='AAA', market_group='Tech',
+                value_start=600, value_end=660, total_change=60,
+                flow_effect=0, market_effect=60, fx_effect=0,
+                residual_effect=0, investment_effect=60,
+            ),
+            dict(
+                start_date=date(2026,10,15), end_date=date(2026,10,16),
+                ticker='BBB', display_name='BBB', market_group='Bank',
+                value_start=400, value_end=360, total_change=-40,
+                flow_effect=0, market_effect=-40, fx_effect=0,
+                residual_effect=0, investment_effect=-40,
+            ),
+        ])
+        current = pd.DataFrame([
+            dict(
+                ticker='AAA', display_name='AAA', sector='Tech',
+                asset_class='日本株', instrument_type='',
+                value_jpy=660, annual_div_jpy=33,
+                after_tax_div_jpy=26,
+            ),
+            dict(
+                ticker='BBB', display_name='BBB', sector='Bank',
+                asset_class='日本株', instrument_type='',
+                value_jpy=360, annual_div_jpy=18,
+                after_tax_div_jpy=14,
+            ),
+        ])
+        result, summary = build_rebalance_diagnostics(
+            detail, 'market_group', current_df=current,
+            drift_threshold_pp=1.0,
+        )
+        tech = result.loc[result.market_group.eq('Tech')].iloc[0]
+        bank = result.loc[result.market_group.eq('Bank')].iloc[0]
+        self.assertAlmostEqual(tech.start_weight_pct,60.0)
+        self.assertAlmostEqual(tech.end_weight_pct,660/1020*100)
+        self.assertGreater(tech.weight_drift_pp,0)
+        self.assertLess(bank.weight_drift_pp,0)
+        self.assertEqual(tech.review,'上昇・リバランス確認')
+        self.assertEqual(bank.review,'出遅れ・買い増し検討')
+        self.assertAlmostEqual(tech.current_dividend_yield_pct,5.0)
+        self.assertAlmostEqual(tech.annual_dividend_after_tax_jpy,26.0)
+        self.assertEqual(summary['actual_start'],date(2026,10,15))
+        self.assertEqual(summary['actual_end'],date(2026,10,16))
 
     def test_estimated_twr_chain_links_daily_returns(self):
         detail = pd.DataFrame([
