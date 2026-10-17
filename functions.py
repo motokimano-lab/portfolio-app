@@ -1658,9 +1658,17 @@ def reconstruct_historical_attribution(
                     residual_effect = v1 - v0 - fx_effect
                     warnings.append(f"{d0}→{d1} {ticker}: 市場参照不足")
 
-            market_group = (
-                "現金" if ticker == "CASH" else sector or asset_class or "未分類"
-            )
+            if ticker == "CASH":
+                market_group = "現金"
+            elif display.upper() in {"SP500", "SCHD"} and (
+                ticker in {"VOO", "SCHD"} or ticker.startswith("MF:")
+            ):
+                # These rows represent the user's Japanese US-equity funds
+                # across the old ETF-proxy display period and the native-fund
+                # period. Keep one stable decision group for drift analysis.
+                market_group = "米国株投信"
+            else:
+                market_group = sector or asset_class or "未分類"
             record = {
                 "start_date": d0, "end_date": d1,
                 "owner": "", "account_type": "", "ticker": ticker,
