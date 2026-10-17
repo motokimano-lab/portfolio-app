@@ -463,7 +463,7 @@ def build_current_market_movers(df, top_n=10):
     return gainers, losers
 
 
-ATTRIBUTION_SCHEMA_VERSION = 5
+ATTRIBUTION_SCHEMA_VERSION = 6
 
 
 DAILY_LOG_V2_HEADERS = [
@@ -818,12 +818,17 @@ def _history_close_series(symbol, start_date, end_date):
 
 
 def build_fund_reference_data(df_v2):
-    """Build proxy-price and USDJPY references aligned to Japanese fund NAV dates.
+    """Build USDJPY references aligned to Japanese mutual-fund NAV base dates.
 
-    For a Japanese NAV dated D, the US-equity proxy uses the latest US close
-    strictly before D. USDJPY uses the latest daily close on or before D.
-    This is an estimate because Japanese funds use their own valuation timing
-    and reference FX rates; any mismatch is kept as a separate residual effect.
+    The portfolio analysis does not compare the fund with VOO/SCHD. For a
+    Japanese NAV dated D, the latest USDJPY close on or before D is used only
+    to separate the NAV move into:
+      fund-own return × FX return.
+
+    The fund-own return therefore includes the fund's actual holdings,
+    distributions inside NAV, fees, tracking differences, cash drag, and other
+    fund-specific effects. This matches the portfolio decision use case better
+    than benchmark-relative attribution.
     """
     data = normalize_daily_log_v2(df_v2)
     if data.empty:
@@ -832,10 +837,9 @@ def build_fund_reference_data(df_v2):
     funds = data[
         data["instrument_type"].eq("mutual_fund")
         & data["fund_base_date"].ne("")
-        & data["proxy_ticker"].ne("")
     ].copy()
     if funds.empty:
-        return {}, ["投資信託の基準日/ベンチマーク情報が未記録です"]
+        return {}, ["投資信託の基準日情報が未記録です"]
 
     funds["fund_base_date_parsed"] = pd.to_datetime(
         funds["fund_base_date"], errors="coerce"
@@ -850,44 +854,21 @@ def build_fund_reference_data(df_v2):
 
     references = {}
     warnings = []
-
     try:
         fx_history = _history_close_series("JPY=X", start, end)
     except Exception as error:
         fx_history = pd.Series(dtype=float)
         warnings.append(f"USDJPY参照取得失敗: {type(error).__name__}")
 
-    proxy_histories = {}
-    for proxy in sorted(funds["proxy_ticker"].unique()):
-        try:
-            proxy_histories[proxy] = _history_close_series(proxy, start, end)
-        except Exception as error:
-            warnings.append(f"{proxy}参照取得失敗: {type(error).__name__}")
+    if fx_history.empty:
+        return {}, warnings
 
-    for _, row in (
-        funds[["proxy_ticker", "fund_base_date_parsed"]]
-        .drop_duplicates()
-        .iterrows()
-    ):
-        proxy = row["proxy_ticker"]
-        base_date = row["fund_base_date_parsed"]
-        proxy_history = proxy_histories.get(proxy)
-        if proxy_history is None or proxy_history.empty or fx_history.empty:
+    for base_date in dates:
+        fx_candidates = fx_history[fx_history.index.date <= base_date]
+        if fx_candidates.empty:
+            warnings.append(f"{base_date}: 対応するUSDJPY参照値なし")
             continue
-
-        proxy_candidates = proxy_history[
-            proxy_history.index.date < base_date
-        ]
-        fx_candidates = fx_history[
-            fx_history.index.date <= base_date
-        ]
-        if proxy_candidates.empty or fx_candidates.empty:
-            warnings.append(f"{proxy} {base_date}: 対応する市場/為替参照値なし")
-            continue
-
-        references[(proxy, base_date.isoformat())] = {
-            "proxy_price": float(proxy_candidates.iloc[-1]),
-            "proxy_market_date": proxy_candidates.index[-1].date().isoformat(),
+        references[base_date.isoformat()] = {
             "usd_jpy": float(fx_candidates.iloc[-1]),
             "fx_date": fx_candidates.index[-1].date().isoformat(),
         }
@@ -896,12 +877,12 @@ def build_fund_reference_data(df_v2):
 
 
 def _fund_reference_for(row, fund_reference):
-    proxy = str(row.get("proxy_ticker", "") or "").strip()
-    base_date = str(row.get("fund_base_date", "") or "").strip()
-    if not proxy or not base_date:
+    if row is None:
         return None
-    return (fund_reference or {}).get((proxy, base_date))
-
+    base_date = str(row.get("fund_base_date", "") or "").strip()
+    if not base_date:
+        return None
+    return (fund_reference or {}).get(base_date)
 
 def attribution_between_snapshots(
     start_df, end_df, start_date, end_date, fund_reference=None
@@ -976,22 +957,28 @@ def attribution_between_snapshots(
             and before_ref
             and after_ref
             and p0 > 0
-            and before_ref["proxy_price"] > 0
+            and p1 > 0
             and before_ref["usd_jpy"] > 0
+            and after_ref["usd_jpy"] > 0
         ):
-            market_ratio = after_ref["proxy_price"] / before_ref["proxy_price"]
+            # Japanese mutual-fund NAV is already JPY-denominated. Decompose
+            # its observed NAV move into fund-own return and USDJPY only:
+            #   NAV ratio = fund-own ratio × FX ratio
+            # No VOO/SCHD benchmark proxy and no "fund residual" bucket.
             fx_ratio = after_ref["usd_jpy"] / before_ref["usd_jpy"]
             nav_ratio = p1 / p0
-            residual_ratio = nav_ratio / (market_ratio * fx_ratio)
+            fund_own_ratio = nav_ratio / fx_ratio
 
-            effects = _shapley_fund_effects(
-                q0, q1, p0, market_ratio, fx_ratio, residual_ratio, unit
+            synthetic_market_end = p0 * fund_own_ratio
+            effects = _shapley_position_effects(
+                q0, p0, 1.0,
+                q1, synthetic_market_end, fx_ratio,
+                unit,
             )
             residual = total_change - sum(effects.values())
-            effects["residual"] += residual
-            residual_effect = effects["residual"]
+            effects["market"] += residual
             fund_fx_estimated = True
-            attribution_method = "fund_proxy_estimate"
+            attribution_method = "fund_nav_fx_split"
         else:
             effects = _shapley_position_effects(
                 q0, p0, f0, q1, p1, f1, unit
@@ -1201,6 +1188,235 @@ def summarize_attribution(detail, group_by):
         .sum()
     )
     return result.sort_values("investment_effect", ascending=False).reset_index(drop=True)
+
+
+def build_rebalance_diagnostics(
+    detail, group_by, current_df=None, drift_threshold_pp=None
+):
+    """Build decision-oriented allocation drift diagnostics.
+
+    The table is designed for rebalancing, not daily scorekeeping. It combines:
+      - start/end portfolio weight
+      - weight drift in percentage points
+      - flow vs investment drivers
+      - group-level flow-adjusted TWR
+      - current dividend yield / annual after-tax dividend capacity when
+        current holdings are supplied
+
+    "Laggard" and "expanded" labels are review prompts, not valuation claims.
+    """
+    if detail is None or detail.empty:
+        return pd.DataFrame(), {}
+
+    group_columns = [group_by] if isinstance(group_by, str) else list(group_by)
+    work = detail.copy()
+    work = work[
+        ~work["ticker"].astype(str).str.upper().eq("HISTORY_GAP")
+    ].copy()
+    if work.empty:
+        return pd.DataFrame(), {}
+
+    work["start_date"] = pd.to_datetime(
+        work["start_date"], errors="coerce"
+    ).dt.date
+    work["end_date"] = pd.to_datetime(
+        work["end_date"], errors="coerce"
+    ).dt.date
+    actual_start = work["start_date"].dropna().min()
+    actual_end = work["end_date"].dropna().max()
+
+    start_rows = work[work["start_date"].eq(actual_start)].copy()
+    end_rows = work[work["end_date"].eq(actual_end)].copy()
+    portfolio_start = float(start_rows["value_start"].sum())
+    portfolio_end = float(end_rows["value_end"].sum())
+
+    effect_columns = [
+        "flow_effect", "market_effect", "fx_effect",
+        "residual_effect", "investment_effect",
+    ]
+    effects = (
+        work.groupby(group_columns, dropna=False, as_index=False)[effect_columns]
+        .sum()
+    )
+    start_values = (
+        start_rows.groupby(group_columns, dropna=False, as_index=False)["value_start"]
+        .sum()
+        .rename(columns={"value_start": "start_value"})
+    )
+    end_values = (
+        end_rows.groupby(group_columns, dropna=False, as_index=False)["value_end"]
+        .sum()
+        .rename(columns={"value_end": "end_value"})
+    )
+
+    result = effects.merge(start_values, on=group_columns, how="outer")
+    result = result.merge(end_values, on=group_columns, how="outer")
+    numeric = effect_columns + ["start_value", "end_value"]
+    for column in numeric:
+        result[column] = pd.to_numeric(
+            result[column], errors="coerce"
+        ).fillna(0.0)
+
+    result["start_weight_pct"] = (
+        result["start_value"] / portfolio_start * 100
+        if portfolio_start > 0 else 0.0
+    )
+    result["end_weight_pct"] = (
+        result["end_value"] / portfolio_end * 100
+        if portfolio_end > 0 else 0.0
+    )
+    result["weight_drift_pp"] = (
+        result["end_weight_pct"] - result["start_weight_pct"]
+    )
+
+    # Group TWR uses the same daily flow-adjusted engine as the portfolio.
+    twr_rows = []
+    twr_grouper = group_columns[0] if len(group_columns) == 1 else group_columns
+    for keys, group in work.groupby(twr_grouper, dropna=False):
+        if len(group_columns) == 1:
+            keys = (keys,)
+        elif not isinstance(keys, tuple):
+            keys = (keys,)
+        _, twr_summary = calculate_estimated_twr(group)
+        twr_rows.append({
+            **{column: value for column, value in zip(group_columns, keys)},
+            "period_twr_pct": (
+                float(twr_summary["twr"]) * 100
+                if twr_summary.get("valid") and twr_summary.get("twr") is not None
+                else float("nan")
+            ),
+        })
+    if twr_rows:
+        result = result.merge(
+            pd.DataFrame(twr_rows), on=group_columns, how="left"
+        )
+    else:
+        result["period_twr_pct"] = float("nan")
+
+    _, portfolio_twr_summary = calculate_estimated_twr(work)
+    portfolio_twr_pct = (
+        float(portfolio_twr_summary["twr"]) * 100
+        if portfolio_twr_summary.get("valid")
+        and portfolio_twr_summary.get("twr") is not None
+        else float("nan")
+    )
+    result["relative_twr_pp"] = result["period_twr_pct"] - portfolio_twr_pct
+
+    # Optional current income context uses the user's current holdings and
+    # whichever forecast/TTM basis is active in app.py.
+    result["current_dividend_yield_pct"] = float("nan")
+    result["annual_dividend_after_tax_jpy"] = float("nan")
+    if current_df is not None and not current_df.empty:
+        current = current_df.copy()
+        if group_by == "market_group":
+            def market_group_for_row(row):
+                ticker = str(row.get("ticker", "") or "").strip().upper()
+                if ticker == "CASH":
+                    return "現金"
+                if str(row.get("instrument_type", "") or "").strip() == "mutual_fund":
+                    return "米国株投信"
+                sector = str(row.get("sector", "") or "").strip()
+                if sector:
+                    return sector
+                asset_class = str(row.get("asset_class", "") or "").strip()
+                return asset_class or "未分類"
+            current["market_group"] = current.apply(
+                market_group_for_row, axis=1
+            )
+
+        if all(column in current.columns for column in group_columns):
+            for column in ["value_jpy", "annual_div_jpy", "after_tax_div_jpy"]:
+                if column not in current.columns:
+                    current[column] = 0.0
+                current[column] = pd.to_numeric(
+                    current[column], errors="coerce"
+                ).fillna(0.0)
+            current_grouped = (
+                current.groupby(group_columns, dropna=False, as_index=False)
+                .agg(
+                    current_value_jpy=("value_jpy", "sum"),
+                    current_annual_dividend_jpy=("annual_div_jpy", "sum"),
+                    annual_dividend_after_tax_jpy=(
+                        "after_tax_div_jpy", "sum"
+                    ),
+                )
+            )
+            current_grouped["current_dividend_yield_pct"] = (
+                current_grouped["current_annual_dividend_jpy"]
+                / current_grouped["current_value_jpy"].where(
+                    current_grouped["current_value_jpy"] > 0
+                )
+                * 100
+            )
+            result = result.drop(
+                columns=[
+                    "current_dividend_yield_pct",
+                    "annual_dividend_after_tax_jpy",
+                ]
+            ).merge(
+                current_grouped[
+                    group_columns
+                    + [
+                        "current_dividend_yield_pct",
+                        "annual_dividend_after_tax_jpy",
+                    ]
+                ],
+                on=group_columns,
+                how="left",
+            )
+
+    threshold = (
+        float(drift_threshold_pp)
+        if drift_threshold_pp is not None
+        else (0.30 if group_by == "display_name" else 0.50)
+    )
+
+    def review_label(row):
+        drift = float(row["weight_drift_pp"])
+        relative = row.get("relative_twr_pp")
+        flow = float(row.get("flow_effect", 0) or 0)
+        investment = float(row.get("investment_effect", 0) or 0)
+        if drift >= threshold:
+            if pd.notna(relative) and float(relative) > 0:
+                return "上昇・リバランス確認"
+            if flow > abs(investment):
+                return "買い増しで配分上昇"
+            return "配分上昇"
+        if drift <= -threshold:
+            if pd.notna(relative) and float(relative) < 0:
+                return "出遅れ・買い増し検討"
+            if flow < -abs(investment):
+                return "売却で配分低下"
+            return "配分低下"
+        return "概ね安定"
+
+    def main_driver(row):
+        candidates = {
+            "売買/資金": abs(float(row.get("flow_effect", 0) or 0)),
+            "市場/投信": abs(float(row.get("market_effect", 0) or 0)),
+            "為替": abs(float(row.get("fx_effect", 0) or 0)),
+        }
+        if abs(float(row.get("residual_effect", 0) or 0)) > 1:
+            candidates["未分解"] = abs(float(row.get("residual_effect", 0) or 0))
+        return max(candidates, key=candidates.get)
+
+    result["review"] = result.apply(review_label, axis=1)
+    result["main_driver"] = result.apply(main_driver, axis=1)
+    result["abs_weight_drift_pp"] = result["weight_drift_pp"].abs()
+    result = result.sort_values(
+        ["abs_weight_drift_pp", "end_weight_pct"],
+        ascending=[False, False],
+    ).reset_index(drop=True)
+
+    summary = {
+        "actual_start": actual_start,
+        "actual_end": actual_end,
+        "portfolio_start": portfolio_start,
+        "portfolio_end": portfolio_end,
+        "portfolio_twr_pct": portfolio_twr_pct,
+        "drift_threshold_pp": threshold,
+    }
+    return result, summary
 
 
 HISTORICAL_RECONSTRUCTION_START = pd.Timestamp("2026-04-12").date()
@@ -1445,9 +1661,17 @@ def reconstruct_historical_attribution(
                     residual_effect = v1 - v0 - fx_effect
                     warnings.append(f"{d0}→{d1} {ticker}: 市場参照不足")
 
-            market_group = (
-                "現金" if ticker == "CASH" else sector or asset_class or "未分類"
-            )
+            if ticker == "CASH":
+                market_group = "現金"
+            elif display.upper() in {"SP500", "SCHD"} and (
+                ticker in {"VOO", "SCHD"} or ticker.startswith("MF:")
+            ):
+                # These rows represent the user's Japanese US-equity funds
+                # across the old ETF-proxy display period and the native-fund
+                # period. Keep one stable decision group for drift analysis.
+                market_group = "米国株投信"
+            else:
+                market_group = sector or asset_class or "未分類"
             record = {
                 "start_date": d0, "end_date": d1,
                 "owner": "", "account_type": "", "ticker": ticker,
