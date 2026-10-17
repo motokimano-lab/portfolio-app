@@ -1190,6 +1190,232 @@ def summarize_attribution(detail, group_by):
     return result.sort_values("investment_effect", ascending=False).reset_index(drop=True)
 
 
+def build_rebalance_diagnostics(
+    detail, group_by, current_df=None, drift_threshold_pp=None
+):
+    """Build decision-oriented allocation drift diagnostics.
+
+    The table is designed for rebalancing, not daily scorekeeping. It combines:
+      - start/end portfolio weight
+      - weight drift in percentage points
+      - flow vs investment drivers
+      - group-level flow-adjusted TWR
+      - current dividend yield / annual after-tax dividend capacity when
+        current holdings are supplied
+
+    "Laggard" and "expanded" labels are review prompts, not valuation claims.
+    """
+    if detail is None or detail.empty:
+        return pd.DataFrame(), {}
+
+    group_columns = [group_by] if isinstance(group_by, str) else list(group_by)
+    work = detail.copy()
+    work = work[
+        ~work["ticker"].astype(str).str.upper().eq("HISTORY_GAP")
+    ].copy()
+    if work.empty:
+        return pd.DataFrame(), {}
+
+    work["start_date"] = pd.to_datetime(
+        work["start_date"], errors="coerce"
+    ).dt.date
+    work["end_date"] = pd.to_datetime(
+        work["end_date"], errors="coerce"
+    ).dt.date
+    actual_start = work["start_date"].dropna().min()
+    actual_end = work["end_date"].dropna().max()
+
+    start_rows = work[work["start_date"].eq(actual_start)].copy()
+    end_rows = work[work["end_date"].eq(actual_end)].copy()
+    portfolio_start = float(start_rows["value_start"].sum())
+    portfolio_end = float(end_rows["value_end"].sum())
+
+    effect_columns = [
+        "flow_effect", "market_effect", "fx_effect",
+        "residual_effect", "investment_effect",
+    ]
+    effects = (
+        work.groupby(group_columns, dropna=False, as_index=False)[effect_columns]
+        .sum()
+    )
+    start_values = (
+        start_rows.groupby(group_columns, dropna=False, as_index=False)["value_start"]
+        .sum()
+        .rename(columns={"value_start": "start_value"})
+    )
+    end_values = (
+        end_rows.groupby(group_columns, dropna=False, as_index=False)["value_end"]
+        .sum()
+        .rename(columns={"value_end": "end_value"})
+    )
+
+    result = effects.merge(start_values, on=group_columns, how="outer")
+    result = result.merge(end_values, on=group_columns, how="outer")
+    numeric = effect_columns + ["start_value", "end_value"]
+    for column in numeric:
+        result[column] = pd.to_numeric(
+            result[column], errors="coerce"
+        ).fillna(0.0)
+
+    result["start_weight_pct"] = (
+        result["start_value"] / portfolio_start * 100
+        if portfolio_start > 0 else 0.0
+    )
+    result["end_weight_pct"] = (
+        result["end_value"] / portfolio_end * 100
+        if portfolio_end > 0 else 0.0
+    )
+    result["weight_drift_pp"] = (
+        result["end_weight_pct"] - result["start_weight_pct"]
+    )
+
+    # Group TWR uses the same daily flow-adjusted engine as the portfolio.
+    twr_rows = []
+    for keys, group in work.groupby(group_columns, dropna=False):
+        if len(group_columns) == 1:
+            keys = (keys,)
+        _, twr_summary = calculate_estimated_twr(group)
+        twr_rows.append({
+            **{column: value for column, value in zip(group_columns, keys)},
+            "period_twr_pct": (
+                float(twr_summary["twr"]) * 100
+                if twr_summary.get("valid") and twr_summary.get("twr") is not None
+                else float("nan")
+            ),
+        })
+    if twr_rows:
+        result = result.merge(
+            pd.DataFrame(twr_rows), on=group_columns, how="left"
+        )
+    else:
+        result["period_twr_pct"] = float("nan")
+
+    _, portfolio_twr_summary = calculate_estimated_twr(work)
+    portfolio_twr_pct = (
+        float(portfolio_twr_summary["twr"]) * 100
+        if portfolio_twr_summary.get("valid")
+        and portfolio_twr_summary.get("twr") is not None
+        else float("nan")
+    )
+    result["relative_twr_pp"] = result["period_twr_pct"] - portfolio_twr_pct
+
+    # Optional current income context uses the user's current holdings and
+    # whichever forecast/TTM basis is active in app.py.
+    result["current_dividend_yield_pct"] = float("nan")
+    result["annual_dividend_after_tax_jpy"] = float("nan")
+    if current_df is not None and not current_df.empty:
+        current = current_df.copy()
+        if group_by == "market_group":
+            def market_group_for_row(row):
+                ticker = str(row.get("ticker", "") or "").strip().upper()
+                if ticker == "CASH":
+                    return "現金"
+                if str(row.get("instrument_type", "") or "").strip() == "mutual_fund":
+                    return "米国株投信"
+                sector = str(row.get("sector", "") or "").strip()
+                if sector:
+                    return sector
+                asset_class = str(row.get("asset_class", "") or "").strip()
+                return asset_class or "未分類"
+            current["market_group"] = current.apply(
+                market_group_for_row, axis=1
+            )
+
+        if all(column in current.columns for column in group_columns):
+            for column in ["value_jpy", "annual_div_jpy", "after_tax_div_jpy"]:
+                if column not in current.columns:
+                    current[column] = 0.0
+                current[column] = pd.to_numeric(
+                    current[column], errors="coerce"
+                ).fillna(0.0)
+            current_grouped = (
+                current.groupby(group_columns, dropna=False, as_index=False)
+                .agg(
+                    current_value_jpy=("value_jpy", "sum"),
+                    current_annual_dividend_jpy=("annual_div_jpy", "sum"),
+                    annual_dividend_after_tax_jpy=(
+                        "after_tax_div_jpy", "sum"
+                    ),
+                )
+            )
+            current_grouped["current_dividend_yield_pct"] = (
+                current_grouped["current_annual_dividend_jpy"]
+                / current_grouped["current_value_jpy"].where(
+                    current_grouped["current_value_jpy"] > 0
+                )
+                * 100
+            )
+            result = result.drop(
+                columns=[
+                    "current_dividend_yield_pct",
+                    "annual_dividend_after_tax_jpy",
+                ]
+            ).merge(
+                current_grouped[
+                    group_columns
+                    + [
+                        "current_dividend_yield_pct",
+                        "annual_dividend_after_tax_jpy",
+                    ]
+                ],
+                on=group_columns,
+                how="left",
+            )
+
+    threshold = (
+        float(drift_threshold_pp)
+        if drift_threshold_pp is not None
+        else (0.30 if group_by == "display_name" else 0.50)
+    )
+
+    def review_label(row):
+        drift = float(row["weight_drift_pp"])
+        relative = row.get("relative_twr_pp")
+        flow = float(row.get("flow_effect", 0) or 0)
+        investment = float(row.get("investment_effect", 0) or 0)
+        if drift >= threshold:
+            if pd.notna(relative) and float(relative) > 0:
+                return "上昇・リバランス確認"
+            if flow > abs(investment):
+                return "買い増しで配分上昇"
+            return "配分上昇"
+        if drift <= -threshold:
+            if pd.notna(relative) and float(relative) < 0:
+                return "出遅れ・買い増し検討"
+            if flow < -abs(investment):
+                return "売却で配分低下"
+            return "配分低下"
+        return "概ね安定"
+
+    def main_driver(row):
+        candidates = {
+            "売買/資金": abs(float(row.get("flow_effect", 0) or 0)),
+            "市場/投信": abs(float(row.get("market_effect", 0) or 0)),
+            "為替": abs(float(row.get("fx_effect", 0) or 0)),
+        }
+        if abs(float(row.get("residual_effect", 0) or 0)) > 1:
+            candidates["未分解"] = abs(float(row.get("residual_effect", 0) or 0))
+        return max(candidates, key=candidates.get)
+
+    result["review"] = result.apply(review_label, axis=1)
+    result["main_driver"] = result.apply(main_driver, axis=1)
+    result["abs_weight_drift_pp"] = result["weight_drift_pp"].abs()
+    result = result.sort_values(
+        ["abs_weight_drift_pp", "end_weight_pct"],
+        ascending=[False, False],
+    ).reset_index(drop=True)
+
+    summary = {
+        "actual_start": actual_start,
+        "actual_end": actual_end,
+        "portfolio_start": portfolio_start,
+        "portfolio_end": portfolio_end,
+        "portfolio_twr_pct": portfolio_twr_pct,
+        "drift_threshold_pp": threshold,
+    }
+    return result, summary
+
+
 HISTORICAL_RECONSTRUCTION_START = pd.Timestamp("2026-04-12").date()
 HISTORICAL_RECONSTRUCTION_END = pd.Timestamp("2026-10-13").date()
 
