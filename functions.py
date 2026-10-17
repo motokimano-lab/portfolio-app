@@ -463,7 +463,7 @@ def build_current_market_movers(df, top_n=10):
     return gainers, losers
 
 
-ATTRIBUTION_SCHEMA_VERSION = 5
+ATTRIBUTION_SCHEMA_VERSION = 6
 
 
 DAILY_LOG_V2_HEADERS = [
@@ -818,12 +818,17 @@ def _history_close_series(symbol, start_date, end_date):
 
 
 def build_fund_reference_data(df_v2):
-    """Build proxy-price and USDJPY references aligned to Japanese fund NAV dates.
+    """Build USDJPY references aligned to Japanese mutual-fund NAV base dates.
 
-    For a Japanese NAV dated D, the US-equity proxy uses the latest US close
-    strictly before D. USDJPY uses the latest daily close on or before D.
-    This is an estimate because Japanese funds use their own valuation timing
-    and reference FX rates; any mismatch is kept as a separate residual effect.
+    The portfolio analysis does not compare the fund with VOO/SCHD. For a
+    Japanese NAV dated D, the latest USDJPY close on or before D is used only
+    to separate the NAV move into:
+      fund-own return × FX return.
+
+    The fund-own return therefore includes the fund's actual holdings,
+    distributions inside NAV, fees, tracking differences, cash drag, and other
+    fund-specific effects. This matches the portfolio decision use case better
+    than benchmark-relative attribution.
     """
     data = normalize_daily_log_v2(df_v2)
     if data.empty:
@@ -832,10 +837,9 @@ def build_fund_reference_data(df_v2):
     funds = data[
         data["instrument_type"].eq("mutual_fund")
         & data["fund_base_date"].ne("")
-        & data["proxy_ticker"].ne("")
     ].copy()
     if funds.empty:
-        return {}, ["投資信託の基準日/ベンチマーク情報が未記録です"]
+        return {}, ["投資信託の基準日情報が未記録です"]
 
     funds["fund_base_date_parsed"] = pd.to_datetime(
         funds["fund_base_date"], errors="coerce"
@@ -850,44 +854,21 @@ def build_fund_reference_data(df_v2):
 
     references = {}
     warnings = []
-
     try:
         fx_history = _history_close_series("JPY=X", start, end)
     except Exception as error:
         fx_history = pd.Series(dtype=float)
         warnings.append(f"USDJPY参照取得失敗: {type(error).__name__}")
 
-    proxy_histories = {}
-    for proxy in sorted(funds["proxy_ticker"].unique()):
-        try:
-            proxy_histories[proxy] = _history_close_series(proxy, start, end)
-        except Exception as error:
-            warnings.append(f"{proxy}参照取得失敗: {type(error).__name__}")
+    if fx_history.empty:
+        return {}, warnings
 
-    for _, row in (
-        funds[["proxy_ticker", "fund_base_date_parsed"]]
-        .drop_duplicates()
-        .iterrows()
-    ):
-        proxy = row["proxy_ticker"]
-        base_date = row["fund_base_date_parsed"]
-        proxy_history = proxy_histories.get(proxy)
-        if proxy_history is None or proxy_history.empty or fx_history.empty:
+    for base_date in dates:
+        fx_candidates = fx_history[fx_history.index.date <= base_date]
+        if fx_candidates.empty:
+            warnings.append(f"{base_date}: 対応するUSDJPY参照値なし")
             continue
-
-        proxy_candidates = proxy_history[
-            proxy_history.index.date < base_date
-        ]
-        fx_candidates = fx_history[
-            fx_history.index.date <= base_date
-        ]
-        if proxy_candidates.empty or fx_candidates.empty:
-            warnings.append(f"{proxy} {base_date}: 対応する市場/為替参照値なし")
-            continue
-
-        references[(proxy, base_date.isoformat())] = {
-            "proxy_price": float(proxy_candidates.iloc[-1]),
-            "proxy_market_date": proxy_candidates.index[-1].date().isoformat(),
+        references[base_date.isoformat()] = {
             "usd_jpy": float(fx_candidates.iloc[-1]),
             "fx_date": fx_candidates.index[-1].date().isoformat(),
         }
@@ -896,12 +877,12 @@ def build_fund_reference_data(df_v2):
 
 
 def _fund_reference_for(row, fund_reference):
-    proxy = str(row.get("proxy_ticker", "") or "").strip()
-    base_date = str(row.get("fund_base_date", "") or "").strip()
-    if not proxy or not base_date:
+    if row is None:
         return None
-    return (fund_reference or {}).get((proxy, base_date))
-
+    base_date = str(row.get("fund_base_date", "") or "").strip()
+    if not base_date:
+        return None
+    return (fund_reference or {}).get(base_date)
 
 def attribution_between_snapshots(
     start_df, end_df, start_date, end_date, fund_reference=None
@@ -976,22 +957,28 @@ def attribution_between_snapshots(
             and before_ref
             and after_ref
             and p0 > 0
-            and before_ref["proxy_price"] > 0
+            and p1 > 0
             and before_ref["usd_jpy"] > 0
+            and after_ref["usd_jpy"] > 0
         ):
-            market_ratio = after_ref["proxy_price"] / before_ref["proxy_price"]
+            # Japanese mutual-fund NAV is already JPY-denominated. Decompose
+            # its observed NAV move into fund-own return and USDJPY only:
+            #   NAV ratio = fund-own ratio × FX ratio
+            # No VOO/SCHD benchmark proxy and no "fund residual" bucket.
             fx_ratio = after_ref["usd_jpy"] / before_ref["usd_jpy"]
             nav_ratio = p1 / p0
-            residual_ratio = nav_ratio / (market_ratio * fx_ratio)
+            fund_own_ratio = nav_ratio / fx_ratio
 
-            effects = _shapley_fund_effects(
-                q0, q1, p0, market_ratio, fx_ratio, residual_ratio, unit
+            synthetic_market_end = p0 * fund_own_ratio
+            effects = _shapley_position_effects(
+                q0, p0, 1.0,
+                q1, synthetic_market_end, fx_ratio,
+                unit,
             )
             residual = total_change - sum(effects.values())
-            effects["residual"] += residual
-            residual_effect = effects["residual"]
+            effects["market"] += residual
             fund_fx_estimated = True
-            attribution_method = "fund_proxy_estimate"
+            attribution_method = "fund_nav_fx_split"
         else:
             effects = _shapley_position_effects(
                 q0, p0, f0, q1, p1, f1, unit
