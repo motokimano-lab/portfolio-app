@@ -1,41 +1,41 @@
 {
-  "generated_at": "2026-11-06T06:31:00.497610+09:00",
+  "generated_at": "2026-11-07T05:58:41.645578+09:00",
   "funds": {
     "89311199": {
       "product_name": "SBI・V・S&P500インデックス・ファンド",
-      "price": 40976.0,
-      "base_date": "2026-11-05",
-      "previous_change": 555.0,
-      "previous_change_pct": 1.3730486628237797,
+      "price": 39080.0,
+      "base_date": "2026-11-06",
+      "previous_change": -1896.0,
+      "previous_change_pct": -4.627098789535338,
       "ttm_distribution": 0.0,
       "forecast_distribution": 0.0,
       "forecast_source": "直近分配金×1回/年（推計・1万口当たり）",
       "source": "yahoo_finance",
-      "fetched_at": "2026-11-06T06:31:00.497610+09:00"
+      "fetched_at": "2026-11-07T05:58:41.645578+09:00"
     },
     "9I312249": {
       "product_name": "楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）",
-      "price": 14417.0,
-      "base_date": "2026-11-05",
-      "previous_change": 232.0,
-      "previous_change_pct": 1.635530489954177,
+      "price": 14060.0,
+      "base_date": "2026-11-06",
+      "previous_change": -357.0,
+      "previous_change_pct": -2.4762433238537835,
       "ttm_distribution": 360.0,
       "forecast_distribution": 380.0,
       "forecast_source": "直近分配金×4回/年（推計・1万口当たり）",
       "source": "yahoo_finance",
-      "fetched_at": "2026-11-06T06:31:00.497610+09:00"
+      "fetched_at": "2026-11-07T05:58:41.645578+09:00"
     },
     "03311187": {
       "product_name": "eMAXIS Slim 米国株式（S&P500）",
-      "price": 44827.0,
-      "base_date": "2026-11-05",
-      "previous_change": 593.0,
-      "previous_change_pct": 1.3405977302527468,
+      "price": 42755.0,
+      "base_date": "2026-11-06",
+      "previous_change": -2072.0,
+      "previous_change_pct": -4.6222142904945684,
       "ttm_distribution": 0.0,
       "forecast_distribution": 0.0,
       "forecast_source": "直近分配金×1回/年（推計・1万口当たり）",
       "source": "yahoo_finance",
-      "fetched_at": "2026-11-06T06:31:00.497610+09:00"
+      "fetched_at": "2026-11-07T05:58:41.645578+09:00"
     }
   }
 }
