@@ -1,41 +1,41 @@
 {
-  "generated_at": "2026-11-13T06:53:09.638653+09:00",
+  "generated_at": "2026-11-14T06:29:13.294707+09:00",
   "funds": {
     "89311199": {
       "product_name": "SBI・V・S&P500インデックス・ファンド",
-      "price": 40966.0,
-      "base_date": "2026-11-12",
-      "previous_change": 710.0,
-      "previous_change_pct": 1.7637122416534181,
+      "price": 40900.0,
+      "base_date": "2026-11-13",
+      "previous_change": -66.0,
+      "previous_change_pct": -0.16110921251769758,
       "ttm_distribution": 0.0,
       "forecast_distribution": 0.0,
       "forecast_source": "直近分配金×1回/年（推計・1万口当たり）",
       "source": "yahoo_finance",
-      "fetched_at": "2026-11-13T06:53:09.638653+09:00"
+      "fetched_at": "2026-11-14T06:29:13.294707+09:00"
     },
     "9I312249": {
       "product_name": "楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）",
-      "price": 14467.0,
-      "base_date": "2026-11-12",
-      "previous_change": 145.0,
-      "previous_change_pct": 1.0124284317832706,
+      "price": 14456.0,
+      "base_date": "2026-11-13",
+      "previous_change": -11.0,
+      "previous_change_pct": -0.07603511439828575,
       "ttm_distribution": 360.0,
       "forecast_distribution": 380.0,
       "forecast_source": "直近分配金×4回/年（推計・1万口当たり）",
       "source": "yahoo_finance",
-      "fetched_at": "2026-11-13T06:53:09.638653+09:00"
+      "fetched_at": "2026-11-14T06:29:13.294707+09:00"
     },
     "03311187": {
       "product_name": "eMAXIS Slim 米国株式（S&P500）",
-      "price": 44828.0,
-      "base_date": "2026-11-12",
-      "previous_change": 790.0,
-      "previous_change_pct": 1.7939052636359507,
+      "price": 44751.0,
+      "base_date": "2026-11-13",
+      "previous_change": -77.0,
+      "previous_change_pct": -0.1717676452217364,
       "ttm_distribution": 0.0,
       "forecast_distribution": 0.0,
       "forecast_source": "直近分配金×1回/年（推計・1万口当たり）",
       "source": "yahoo_finance",
-      "fetched_at": "2026-11-13T06:53:09.638653+09:00"
+      "fetched_at": "2026-11-14T06:29:13.294707+09:00"
     }
   }
 }
