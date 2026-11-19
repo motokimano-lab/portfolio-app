@@ -1,41 +1,41 @@
 {
-  "generated_at": "2026-11-19T07:39:32.609639+09:00",
+  "generated_at": "2026-11-20T07:43:30.164547+09:00",
   "funds": {
     "89311199": {
       "product_name": "SBI・V・S&P500インデックス・ファンド",
-      "price": 39493.0,
-      "base_date": "2026-11-18",
-      "previous_change": -377.0,
-      "previous_change_pct": -0.945573112616002,
+      "price": 39346.0,
+      "base_date": "2026-11-19",
+      "previous_change": -147.0,
+      "previous_change_pct": -0.37221786139315827,
       "ttm_distribution": 0.0,
       "forecast_distribution": 0.0,
       "forecast_source": "直近分配金×1回/年（推計・1万口当たり）",
       "source": "yahoo_finance",
-      "fetched_at": "2026-11-19T07:39:32.609639+09:00"
+      "fetched_at": "2026-11-20T07:43:30.164547+09:00"
     },
     "9I312249": {
       "product_name": "楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）",
-      "price": 14179.0,
-      "base_date": "2026-11-18",
-      "previous_change": -207.0,
-      "previous_change_pct": -1.438898929514806,
+      "price": 13923.0,
+      "base_date": "2026-11-19",
+      "previous_change": -256.0,
+      "previous_change_pct": -1.8054869877988575,
       "ttm_distribution": 360.0,
       "forecast_distribution": 380.0,
       "forecast_source": "直近分配金×4回/年（推計・1万口当たり）",
       "source": "yahoo_finance",
-      "fetched_at": "2026-11-19T07:39:32.609639+09:00"
+      "fetched_at": "2026-11-20T07:43:30.164547+09:00"
     },
     "03311187": {
       "product_name": "eMAXIS Slim 米国株式（S&P500）",
-      "price": 43200.0,
-      "base_date": "2026-11-18",
-      "previous_change": -407.0,
-      "previous_change_pct": -0.9333363909464077,
+      "price": 43063.0,
+      "base_date": "2026-11-19",
+      "previous_change": -137.0,
+      "previous_change_pct": -0.3171296296296296,
       "ttm_distribution": 0.0,
       "forecast_distribution": 0.0,
       "forecast_source": "直近分配金×1回/年（推計・1万口当たり）",
       "source": "yahoo_finance",
-      "fetched_at": "2026-11-19T07:39:32.609639+09:00"
+      "fetched_at": "2026-11-20T07:43:30.164547+09:00"
     }
   }
 }
