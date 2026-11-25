@@ -1,41 +1,41 @@
 {
-  "generated_at": "2026-11-25T08:59:39.553589+09:00",
+  "generated_at": "2026-11-26T08:43:59.581651+09:00",
   "funds": {
     "89311199": {
       "product_name": "SBI・V・S&P500インデックス・ファンド",
-      "price": 38782.0,
-      "base_date": "2026-11-24",
-      "previous_change": 207.0,
-      "previous_change_pct": 0.5366169799092676,
+      "price": 38692.0,
+      "base_date": "2026-11-25",
+      "previous_change": -90.0,
+      "previous_change_pct": -0.2320664225671703,
       "ttm_distribution": 0.0,
       "forecast_distribution": 0.0,
       "forecast_source": "直近分配金×1回/年（推計・1万口当たり）",
       "source": "yahoo_finance",
-      "fetched_at": "2026-11-25T08:59:39.553589+09:00"
+      "fetched_at": "2026-11-26T08:43:59.581651+09:00"
     },
     "9I312249": {
       "product_name": "楽天・シュワブ・高配当株式・米国ファンド（四半期決算型）",
-      "price": 13750.0,
-      "base_date": "2026-11-24",
-      "previous_change": 27.0,
-      "previous_change_pct": 0.19674998178240913,
-      "ttm_distribution": 275.0,
+      "price": 13889.0,
+      "base_date": "2026-11-25",
+      "previous_change": 139.0,
+      "previous_change_pct": 1.010909090909091,
+      "ttm_distribution": 370.0,
       "forecast_distribution": 380.0,
       "forecast_source": "直近分配金×4回/年（推計・1万口当たり）",
       "source": "yahoo_finance",
-      "fetched_at": "2026-11-25T08:59:39.553589+09:00"
+      "fetched_at": "2026-11-26T08:43:59.581651+09:00"
     },
     "03311187": {
       "product_name": "eMAXIS Slim 米国株式（S&P500）",
-      "price": 42418.0,
-      "base_date": "2026-11-24",
-      "previous_change": 211.0,
-      "previous_change_pct": 0.49991707536664537,
+      "price": 42313.0,
+      "base_date": "2026-11-25",
+      "previous_change": -105.0,
+      "previous_change_pct": -0.247536423216559,
       "ttm_distribution": 0.0,
       "forecast_distribution": 0.0,
       "forecast_source": "直近分配金×1回/年（推計・1万口当たり）",
       "source": "yahoo_finance",
-      "fetched_at": "2026-11-25T08:59:39.553589+09:00"
+      "fetched_at": "2026-11-26T08:43:59.581651+09:00"
     }
   }
 }
